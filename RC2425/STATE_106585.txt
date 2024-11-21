@@ -1,0 +1,10 @@
+ 
+     Active game found for player 106585
+Game initiated: 2024-11-21 23:26:44 with 420 seconds to be completed
+
+     --- Transactions found: 1 ---
+
+Trial: BBBB, nB: 0, nW: 0 at   8s
+
+  -- 407 seconds remaining to be completed -- 
+

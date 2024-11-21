@@ -1,0 +1,425 @@
+#include "client.hpp"
+#include "../constant.hpp"
+#include "../utils.hpp"
+
+using namespace std;
+using namespace protocols;
+
+std::string serverIP = DSIP_DEFAULT; // Localhost if not specified
+int serverPort = DSPORT_DEFAULT; // Default port
+std::string plid;
+int udpSocket, tcpSocket;
+int nT = 0; // Trial number
+struct addrinfo hints, *udpRes, *tcpRes;
+char buffer[128]; // Buffer for receiving data from the server
+
+// Function definitions
+void parseArguments(int argc, char* argv[]) {
+    if (argc > 1) {
+        serverIP = argv[2];
+        serverPort = std::atoi(argv[4]);
+    }
+    std::cout << "Server IP: " << serverIP << "\n";
+    std::cout << "Server Port: " << serverPort << "\n";
+}
+
+void setupUDPSocket() {
+    udpSocket = socket(AF_INET, SOCK_DGRAM, 0);
+    if (udpSocket == -1) {
+        std::cerr << "Error creating UDP socket.\n";
+        exit(EXIT_FAILURE);
+    }
+
+    memset(&hints, 0, sizeof hints);
+    hints.ai_family = AF_INET;
+    hints.ai_socktype = SOCK_DGRAM;
+
+    std::string portStr = std::to_string(serverPort);
+    int errcode = getaddrinfo(serverIP.c_str(), portStr.c_str(), &hints, &udpRes);
+    if (errcode != 0) {
+        std::cerr << "getaddrinfo error: " << gai_strerror(errcode) << "\n";
+        exit(EXIT_FAILURE);
+    }
+}
+
+void closeUDPSocket() {
+    freeaddrinfo(udpRes);
+    close(udpSocket);
+}
+
+void sendUDPMessage(const std::string& message) {
+    ssize_t n = sendto(udpSocket, message.c_str(), message.size(), 0, udpRes->ai_addr, udpRes->ai_addrlen);
+    if (n == -1) {
+        std::cerr << "Failed to send UDP message.\n";
+        exit(1);
+    }
+}
+
+std::string receiveUDPMessage() {
+    char buffer[BUFFER_SIZE];
+    struct sockaddr_in addr;
+    socklen_t addrlen = sizeof(addr);
+    ssize_t n = -1;
+    int retryCount = 0;
+
+    // Retry up to 3 times
+    while (retryCount < 3) {
+        n = recvfrom(udpSocket, buffer, sizeof(buffer) - 1, 0, (struct sockaddr*)&addr, &addrlen);
+        if (n == -1) {
+            retryCount++;
+            std::this_thread::sleep_for(std::chrono::seconds(1));
+            continue; // Retry on failure
+        }
+        // If received successfully, break out of the loop
+        break;
+    }
+    buffer[n] = '\0';
+    return std::string(buffer);
+}
+
+void setupTCPSocket() {
+    tcpSocket = socket(AF_INET, SOCK_STREAM, 0);
+    if (tcpSocket == -1) {
+        std::cerr << "Error creating TCP socket.\n";
+        exit(EXIT_FAILURE);
+    }
+
+    memset(&hints, 0, sizeof hints);
+    hints.ai_family = AF_INET;
+    hints.ai_socktype = SOCK_STREAM;
+
+    std::string portStr = std::to_string(serverPort);
+    int errcode = getaddrinfo(serverIP.c_str(), portStr.c_str(), &hints, &tcpRes);
+    if (errcode != 0) {
+        std::cerr << "getaddrinfo error: " << gai_strerror(errcode) << "\n";
+        exit(EXIT_FAILURE);
+    }
+
+    if (connect(tcpSocket, tcpRes->ai_addr, tcpRes->ai_addrlen) < 0) {
+        std::cerr << "Error connecting to server.\n";
+        close(tcpSocket);
+        exit(EXIT_FAILURE);
+    }
+}
+
+void sendTCPMessage(const std::string& message) {
+    size_t totalSent = 0;
+    size_t messageLength = message.size();
+    const char* buffer = message.c_str();
+
+    while (totalSent < messageLength) {
+        int n = write(tcpSocket, buffer + totalSent, messageLength - totalSent);
+        if (n == -1) {
+            if (errno == EINTR) {
+                continue;
+            }
+            std::cerr << "Failed to send TCP message.\n";
+            close(tcpSocket);
+            exit(1);
+        }
+        totalSent += n;
+    }
+}
+
+std::string receiveTCPMessage() {
+    char buffer[BUFFER_SIZE];
+    std::string completeMessage;
+    
+    while (true) {
+        ssize_t n = read(tcpSocket, buffer, sizeof(buffer) - 1);
+        if (n == -1) {
+            if (errno == EINTR) {
+                continue;
+            }
+            std::cerr << "Failed to receive TCP message.\n";
+            close(tcpSocket);
+            exit(1);
+        }
+        if (n == 0) {
+            break;
+        }
+
+        buffer[n] = '\0';
+        completeMessage += std::string(buffer, n);
+
+        if (!completeMessage.empty() && completeMessage.back() == '\n') {
+            break;
+        }
+    }
+    
+    return completeMessage;
+}
+
+void closeTCPSocket() {
+    freeaddrinfo(tcpRes);
+    close(tcpSocket);
+}
+
+int handleResponse(std::string response) { 
+    std::istringstream iss(response);
+    std::string status;
+    iss >> status;
+
+    if (status == "RSG") { // Game start response
+        std::string gameStatus;
+        iss >> gameStatus;
+        if (gameStatus == "OK") {
+            std::string C1, C2, C3, C4;
+            iss >> C1 >> C2 >> C3 >> C4;
+            std::cout << "Game started successfully.\n";
+            return SUCCESS;
+        } else if (gameStatus == "NOK") {
+            std::cout << "Failed to start game: Player has an ongoing game.\n";
+            return FAIL;
+        } else if (gameStatus == "ERR") {
+            std::cout << "Failed to start game: Invalid request.\n";
+            return FAIL;
+        }
+    } else if (status == "RTR") { // Trial response
+        std::string trialStatus;
+        iss >> trialStatus;
+        if (trialStatus == "OK") {
+            int nT, nB, nW;
+            std::string C1, C2, C3, C4;
+            iss >> nT >> nB >> nW >> C1 >> C2 >> C3 >> C4;
+            std::cout << "Trial " << nT << "nB: " << nB << "   nW: " << nW << ".\n";
+            if (nB == 4) {
+                std::cout << "Congratulations! You've guessed the secret key\n";
+                return SUCCESS;
+            }
+        } else if (trialStatus == "DUP") {
+            std::cout << "Duplicated trial.\n";
+            return FAIL;
+        } else if (trialStatus == "INV") {
+            std::cout << "Invalid trial number or guess.\n";
+            return FAIL;
+        } else if (trialStatus == "NOK") {
+            std::cout << "No ongoing game for this player.\n";
+            return FAIL;
+        } else if (trialStatus == "ENT") {
+            std::string C1, C2, C3, C4;
+            iss >> C1 >> C2 >> C3 >> C4;
+            std::cout << "No more attempts available. The secret key was: " << C1 << " " << C2 << " " << C3 << " " << C4 << "\n";
+            return FAIL;
+        } else if (trialStatus == "ETM") {
+            std::string C1, C2, C3, C4;
+            iss >> C1 >> C2 >> C3 >> C4;
+            std::cout << "Maximum play time exceeded. The secret key was: " << C1 << " " << C2 << " " << C3 << " " << C4 << "\n";
+            return FAIL;
+        } else if (trialStatus == "ERR") {
+            std::cout << "Error in trial request.\n";
+            return FAIL;
+        }
+    } else if (status == "RQT") { // Quit response
+        std::string quitStatus;
+        iss >> quitStatus;
+        if (quitStatus == "OK") {
+            std::string C1, C2, C3, C4;
+            iss >> C1 >> C2 >> C3 >> C4;
+            std::cout << "Game terminated. The secret key was: " << C1 << " " << C2 << " " << C3 << " " << C4 << "\n";
+            return SUCCESS;
+        } else if (quitStatus == "NOK") {
+            std::cout << "No ongoing game to terminate.\n";
+            return FAIL;
+        } else if (quitStatus == "ERR") {
+            std::cout << "Error in quit request.\n";
+            return FAIL;
+        }
+    } else if (status == "RDB") { // Debug response
+        std::string debugStatus;
+        iss >> debugStatus;
+        if (debugStatus == "OK") {
+            std::cout << "Debug game started successfully.\n";
+            return SUCCESS;
+        } else if (debugStatus == "NOK") {
+            std::cout << "Failed to start debug game: Player has an ongoing game.\n";
+            return FAIL;
+        } else if (debugStatus == "ERR") {
+            std::cout << "Failed to start debug game: Invalid request.\n";
+            return FAIL;
+        }
+    } else if (status == "RST") { // Show trials response
+        std::string trialStatus;
+        iss >> trialStatus;
+        if (trialStatus == "ACT" || trialStatus == "FIN") {
+            std::string Fname, FsizeStr;
+            int Fsize;
+            iss >> Fname >> FsizeStr;
+            Fsize = std::stoi(FsizeStr);
+            std::string Fdata((std::istreambuf_iterator<char>(iss)), std::istreambuf_iterator<char>());
+            std::ofstream outFile(Fname);
+            outFile << Fdata;
+            outFile.close();
+            std::cout << "Received file: " << Fname << " (" << Fsize << " bytes)\n";
+            std::cout << response;
+            return SUCCESS;
+        } else if (trialStatus == "NOK") {
+            std::cout << "No ongoing or finished game for this player.\n";
+            return FAIL;
+        } else {
+            std::cout << "Unexpected response: " << response;
+            return FAIL;
+        }
+    } else if (status == "RSS") { // Scoreboard response
+        std::string scoreboardStatus;
+        iss >> scoreboardStatus;
+        if (scoreboardStatus == "OK") {
+            std::string Fname, FsizeStr;
+            int Fsize;
+            iss >> Fname >> FsizeStr;
+            Fsize = std::stoi(FsizeStr);
+            std::string Fdata((std::istreambuf_iterator<char>(iss)), std::istreambuf_iterator<char>());
+            std::ofstream outFile(Fname);
+            outFile << Fdata;
+            outFile.close();
+            std::cout << "Received scoreboard file: " << Fname << " (" << Fsize << " bytes)\n";
+            std::cout << response;
+            return SUCCESS;
+        } else if (scoreboardStatus == "EMPTY") {
+            std::cout << "Scoreboard is empty.\n";
+            return FAIL;
+        } else {
+            std::cout << "Unexpected response: " << response << "\n";
+            return FAIL;
+        }
+    } else {
+        std::cout << "Unexpected response(out of the protocol): " << response << "\n";
+        return FAIL;
+    }
+    return SUCCESS;
+}
+
+void handleStartGame(const std::string& command) {
+    std::istringstream iss(command);
+    std::string cmd;
+    int maxPlayTime;
+    iss >> cmd >> plid >> maxPlayTime;
+    // Initialize trial number as 0
+    nT = 0;
+
+    // Format the SNG command
+    std::string sngCommand = "SNG " + plid + " " + std::to_string(maxPlayTime) + "\n";
+    sendUDPMessage(sngCommand);
+    std::string response = receiveUDPMessage();
+    if(handleResponse(response) == SUCCESS){
+        fprintf(stdout, "New game started (max %d sec)\n", maxPlayTime);
+    }
+    
+}
+
+void handleTry(const std::string& command) {
+    std::istringstream iss(command);
+    std::string cmd, colors;
+    iss >> cmd;
+    std::getline(iss >> std::ws, colors);
+
+    // Format the TRY command
+    std::string tryCommand = "TRY " + plid + " " + colors + " " + std::to_string(++nT) + "\n";
+    sendUDPMessage(tryCommand);
+    std::string response = receiveUDPMessage();
+    handleResponse(response);
+}
+
+void handleShowTrials() {
+    // Check player ID
+    if (plid.empty()) {
+        std::cout << "Player ID not set.\n";
+        return;
+    }
+
+    // Setup TCP connection
+    setupTCPSocket();
+
+    // Send command
+    std::string strCommand = "STR " + plid + "\n";
+    sendTCPMessage(strCommand);
+
+    // Receive response
+    std::string response = receiveTCPMessage();
+    if (response.empty()) {
+        std::cout << "Failed to receive response.\n";
+        closeTCPSocket();
+        return;
+    }
+
+    handleResponse(response);
+    closeTCPSocket();
+}
+
+void handleScoreboard() {
+    // Setup TCP connection
+    setupTCPSocket();
+
+    // Send command
+    std::string ssbCommand = "SSB\n";
+    sendTCPMessage(ssbCommand);
+
+    // Receive response
+    std::string response = receiveTCPMessage();
+    if (response.empty()) {
+        std::cout << "Failed to receive response.\n";
+        closeTCPSocket();
+        return;
+    }
+
+    handleResponse(response);
+    closeTCPSocket();
+}
+
+int handleQuitExit() {
+    std::string qutCommand = "QUT " + plid + "\n";
+    sendUDPMessage(qutCommand);
+    std::string response = receiveUDPMessage();
+    return 0;
+}
+
+void handleDebug(const std::string& command) {
+    std::istringstream iss(command);
+    std::string cmd, C1, C2, C3, C4;
+    int maxPlayTime;
+    iss >> cmd >> plid >> maxPlayTime >> C1 >> C2 >> C3 >> C4;
+    // Initialize trial number as 0
+    nT = 0;
+
+    // Format the DBG command
+    std::string dbgCommand = "DBG " + plid + " " + std::to_string(maxPlayTime) + " " + C1 + " " + C2 + " " + C3 + " " + C4 + "\n";
+    sendUDPMessage(dbgCommand);
+    std::string response = receiveUDPMessage();
+    handleResponse(response);
+    std::cout << "Debug game started with duration " << maxPlayTime << " seconds and secret key " << C1 << " " << C2 << " " << C3 << " " << C4 << ".\n";
+}
+
+void handleCommands(int udpSocket, struct addrinfo* udpRes, int tcpSocket, const std::string& serverIP, int serverPort) {
+    std::string command;
+
+    while (true) {
+        // Read a line of input from the user
+        std::cout << "Please insert a command:";
+        std::getline(std::cin, command);
+
+        // Process the command using dedicated functions
+        if (command.substr(0, 5) == "start") {
+            handleStartGame(command);
+        } else if (command.substr(0, 3) == "try") {
+            handleTry(command);
+        } else if (command == "show_trials" || command == "st") {
+            handleShowTrials();
+        } else if (command == "scoreboard" || command == "sb") {
+            handleScoreboard();
+        } else if (command == "exit" || command == "quit") {
+            if (handleQuitExit() == 0) break;
+        } else if (command.substr(0, 5) == "debug") {
+            handleDebug(command);
+        } else {
+            std::cout << "Unknown command.\n";
+        }
+    }
+}
+
+int main(int argc, char* argv[]) {
+    parseArguments(argc, argv);
+    setupUDPSocket();
+    handleCommands(udpSocket, udpRes, tcpSocket, serverIP, serverPort);
+    closeUDPSocket();
+    return 0;
+}
