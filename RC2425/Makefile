@@ -1,19 +1,22 @@
 CC     = g++
-
-CFLAGS = -Wall
+CFLAGS = -Wall -std=c++11
 
 .PHONY: all clean
 
-all: player DS
+# Main targets
+all: player GS
 
+# Player executable
 player: Client/client.cpp utils.o
 	$(CC) $(CFLAGS) -o player Client/client.cpp utils.o
 
-utils.o: utils.cpp constant.hpp
-	$(CC) $(CFLAGS) -c -o utils.o utils.cpp
+# Server executable
+GS: Server/server.cpp utils.o 
+	$(CC) $(CFLAGS) -o GS Server/server.cpp utils.o
 
-DS: Server/Server.cpp utils.o
-	$(CC) $(CFLAGS) -o DS Server/server.cpp utils.o
-	
+# Shared utilities
+utils.o: utils.cpp utils.hpp constant.hpp
+	$(CC) $(CFLAGS) -c utils.cpp -o utils.o
+
 clean:
-	rm -f DS player *.o
+	rm -f player GS *.o
