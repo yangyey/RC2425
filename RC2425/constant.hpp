@@ -4,8 +4,8 @@
 #define CLIENT "client"
 #define SERVER "server"
 
-#define DSIP_DEFAULT ""
-#define DSPORT_DEFAULT 58011
+#define DSIP_DEFAULT "localhost"
+#define DSPORT_DEFAULT 58030
 
 
 #define FAIL -1

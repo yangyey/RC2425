@@ -18,7 +18,25 @@
 #include <cstdio>
 #include <sys/stat.h>
 
-namespace protocols{
+namespace protocols {
 
+    // Common send/receive functions
+    int sendTCPMessage(int sock, const std::string& message);
+    std::string receiveTCPMessage(int sock);
+    void sendUDPMessage(int sock, const std::string& message, struct addrinfo* udpRes);
+    std::string receiveUDPMessage(int sock, struct addrinfo* udpRes);
+
+    // Response status codes
+    const std::string OK = "OK";
+    const std::string NOK = "NOK";
+    const std::string ERR = "ERR";
+    const std::string DUP = "DUP";
+    const std::string INV = "INV";
+    const std::string ENT = "ENT";
+    const std::string ETM = "ETM";
+    const std::string ACT = "ACT";
+    const std::string FIN = "FIN";
+    const std::string EMPTY = "EMPTY";
 }
+
 #endif
