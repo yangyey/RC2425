@@ -25,6 +25,7 @@ namespace protocols {
     std::string receiveTCPMessage(int sock);
     void sendUDPMessage(int sock, const std::string& message, struct addrinfo* udpRes);
     std::string receiveUDPMessage(int sock, struct addrinfo* udpRes);
+    std::string receiveUDPMessage(int sockfd, struct sockaddr_in* client_addr, socklen_t* addrlen);
 
     // Response status codes
     const std::string OK = "OK";

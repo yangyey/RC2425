@@ -25,9 +25,6 @@ void GameClient::parseArguments(int argc, char** argv) {
     if (argc > 1) {
         serverIP = argv[2];
         serverPort = atoi(argv[4]);
-    } else {
-        serverIP = DSIP_DEFAULT;
-        serverPort = DSPORT_DEFAULT;
     }
     fprintf(stdout, "Server IP: %s\n", serverIP.c_str());
     fprintf(stdout, "Server Port: %d\n", serverPort);
@@ -296,7 +293,7 @@ void GameClient::handleStartGame(const string& command) {
     char sngCommand[128];
     snprintf(sngCommand, sizeof(sngCommand), "SNG %s %d\n", plid.c_str(), maxPlayTime);
     sendUDPMessage(udpSocket, sngCommand, udpRes);
-    std::string response = receiveUDPMessage(udpSocket, udpRes);
+    std::string response = receiveUDPMessage(udpSocket, (struct sockaddr_in*)udpRes->ai_addr, &udpRes->ai_addrlen);
     if(handleResponse(response) == SUCCESS) {
         fprintf(stdout, "New game started (max %d sec)\n", maxPlayTime);
     }
@@ -309,7 +306,7 @@ void GameClient::handleTry(const string& command) {
     char tryCommand[256];
     snprintf(tryCommand, sizeof(tryCommand), "TRY %s %s %d\n", plid.c_str(), colors, ++nT);
     sendUDPMessage(udpSocket, tryCommand, udpRes);
-    std::string response = receiveUDPMessage(udpSocket, udpRes);
+    std::string response = receiveUDPMessage(udpSocket, (struct sockaddr_in*)udpRes->ai_addr, &udpRes->ai_addrlen);
     if(handleResponse(response) == FAIL)
         nT--;
 }
@@ -371,7 +368,7 @@ void GameClient::handleScoreboard() {
 int GameClient::handleQuitExit() {
     std::string qutCommand = "QUT " + plid + "\n";
     sendUDPMessage(udpSocket, qutCommand, udpRes);
-    std::string response = receiveUDPMessage(udpSocket, udpRes);
+    std::string response = receiveUDPMessage(udpSocket, (struct sockaddr_in*)udpRes->ai_addr, &udpRes->ai_addrlen);
     return 0;
 }
 
@@ -386,7 +383,7 @@ void GameClient::handleDebug(const std::string& command) {
     char dbgCommand[256];
     snprintf(dbgCommand, sizeof(dbgCommand), "DBG %s %d %s %s %s %s\n", plid.c_str(), maxPlayTime, C1, C2, C3, C4);
     sendUDPMessage(udpSocket, dbgCommand, udpRes);
-    std::string response = receiveUDPMessage(udpSocket, udpRes);
+    std::string response = receiveUDPMessage(udpSocket, (struct sockaddr_in*)udpRes->ai_addr, &udpRes->ai_addrlen);
     handleResponse(response);
     fprintf(stdout, "Debug game started with duration %d seconds and secret key %s %s %s %s.\n", maxPlayTime, C1, C2, C3, C4);
 }

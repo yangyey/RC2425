@@ -12,6 +12,7 @@
 #define SUCCESS 0
 #define VALID 1
 #define INVALID -1
+#define MAX_ATTEMPTS 8
 
 
 //SIZES//

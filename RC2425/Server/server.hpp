@@ -40,15 +40,16 @@ private:
 
     void setupSockets(int port);
     void handleConnections();
-    void receiveUDPMessage();
-    void receiveTCPMessage();
+    // void receiveUDPMessage();
+    // void receiveTCPMessage();
     std::string handleRequest(const std::string& request, bool isTCP);
-    // std::string handleStartGame(std::istringstream& iss);
-    // std::string handleTry(std::istringstream& iss);
+    std::string handleStartGame(std::istringstream& iss);
+    std::string handleTry(std::istringstream& iss);
     // std::string handleQuit(std::istringstream& iss);
     // std::string handleDebug(std::istringstream& iss);
     // std::string handleShowTrials(std::istringstream& iss);
     // std::string handleScoreboard();
+    void countMatches(const std::string& guess, const std::string& secret, int& nB, int& nW);
 
 public:
     Server(int port);

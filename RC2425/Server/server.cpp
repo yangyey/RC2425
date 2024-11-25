@@ -14,10 +14,11 @@ Game::Game(const std::string& pid, int maxPlayTime)
 }
 
 void Game::generateSecretKey() {
-    const std::string charset = "0123456789";
+    const std::vector<char> colors = {'R', 'G', 'B', 'Y', 'O', 'P'};  // Valid colors
     secretKey = "";
     for(int i = 0; i < 4; i++) {
-        secretKey += charset[rand() % charset.length()];
+        if (i > 0) secretKey += " ";  // Add space between colors
+        secretKey += colors[rand() % colors.size()];  // Randomly select a color
     }
 }
 
@@ -27,6 +28,7 @@ bool Game::isTimeExceeded() {
 
 // Server implementation
 Server::Server(int port) : running(true) {
+    std::cout << "Server running on port " << port << std::endl;
     setupSockets(port);
     run();
 }
@@ -36,7 +38,6 @@ void Server::setupSockets(int port) {
     // Setup TCP socket
     tfd = socket(AF_INET, SOCK_STREAM, 0);
     if (tfd == -1) {
-        freeaddrinfo(res);
         throw runtime_error("Failed to create TCP socket");
     }
     memset(&hints, 0, sizeof(hints));
@@ -66,6 +67,10 @@ void Server::setupSockets(int port) {
     freeaddrinfo(res);
 
     // Setup UDP socket
+    ufd = socket(AF_INET, SOCK_DGRAM, 0);
+    if (ufd == -1) {
+        throw runtime_error("Failed to create UDP socket");
+    }
     memset(&hints, 0, sizeof(hints));
     hints.ai_family = AF_INET;
     hints.ai_socktype = SOCK_DGRAM;
@@ -75,11 +80,6 @@ void Server::setupSockets(int port) {
         throw runtime_error(string("getaddrinfo: ") + gai_strerror(errcode));
     }
 
-    ufd = socket(res->ai_family, res->ai_socktype, res->ai_protocol);
-    if (ufd == -1) {
-        freeaddrinfo(res);
-        throw runtime_error("Failed to create UDP socket");
-    }
 
     if (bind(ufd, res->ai_addr, res->ai_addrlen) == -1) {
         throw runtime_error("UDP bind failed");
@@ -92,7 +92,6 @@ void Server::setupSockets(int port) {
     FD_SET(tfd, &inputs);
     FD_SET(ufd, &inputs);
     
-    max_fd = max(tfd, ufd) + 1;
 }
 
 void Server::run() {
@@ -101,7 +100,7 @@ void Server::run() {
         timeout.tv_sec = 10;
         timeout.tv_usec = 0;
 
-        int ready = select(max_fd, &testfds, NULL, NULL, &timeout);
+        int ready = select(FD_SETSIZE, &testfds, NULL, NULL, &timeout);
         
         if (ready < 0) {
             if (errno == EINTR) continue;
@@ -119,59 +118,30 @@ void Server::run() {
 
 void Server::handleConnections() {
     if (FD_ISSET(ufd, &testfds)) {
-        receiveUDPMessage();
+        struct sockaddr_in client_addr;
+        socklen_t addrlen = sizeof(client_addr);
+        std::string message = protocols::receiveUDPMessage(ufd, &client_addr, &addrlen);
+        std::string response = handleRequest(message, false);
+        
+        // Send response back to client
+        sendto(ufd, response.c_str(), response.length(), 0,
+               (struct sockaddr*)&client_addr, addrlen);
     }
     
     if (FD_ISSET(tfd, &testfds)) {
-        receiveTCPMessage();
-    }
-}
-
-void Server::receiveUDPMessage() {
-    char buffer[BUFFER_SIZE];
-    struct sockaddr_in client_addr;
-    socklen_t addr_len = sizeof(client_addr);
-    ssize_t n = recvfrom(ufd, buffer, BUFFER_SIZE-1, 0,
-                    (struct sockaddr*)&client_addr, &addr_len);
+        struct sockaddr_in client_addr;
+        socklen_t addrlen = sizeof(client_addr);
+        int client_fd = accept(tfd, (struct sockaddr*)&client_addr, &addrlen);
         
-    if (n == -1) return;
-    
-    buffer[n] = '\0';
-    char host[NI_MAXHOST], service[NI_MAXSERV];
-    
-    if (getnameinfo((struct sockaddr*)&client_addr, addr_len,
-                host, sizeof(host), service, sizeof(service), 0) == 0) {
-        cout << "UDP message from " << host << ":" << service << endl;
-        string response = handleRequest(string(buffer), false);
-        sendto(ufd, response.c_str(), response.length(), 0, 
-               (struct sockaddr*)&client_addr, addr_len);
-    }
-}
-
-void Server::receiveTCPMessage() {
-    char buffer[BUFFER_SIZE];
-    struct sockaddr_in client_addr;
-    socklen_t addr_len = sizeof(client_addr);
-    int client_fd = accept(tfd, (struct sockaddr*)&client_addr, &addr_len);
-    
-    if (client_fd < 0) {
-        cerr << "Accept failed\n";
-        return;
-    }
-
-    ssize_t n = read(client_fd, buffer, BUFFER_SIZE-1);
-    if (n > 0) {
-        buffer[n] = '\0';
-        char host[NI_MAXHOST], service[NI_MAXSERV];
-        if (getnameinfo((struct sockaddr*)&client_addr, addr_len,
-                   host, sizeof(host), service, sizeof(service), 0) == 0) {
-            cout << "TCP connection from " << host << ":" << service << endl;
-            string response = handleRequest(string(buffer), true);
+        if (client_fd >= 0) {
+            std::string message = protocols::receiveTCPMessage(client_fd);
+            std::string response = handleRequest(message, true);
+            
+            // Send response back to client
             write(client_fd, response.c_str(), response.length());
+            close(client_fd);
         }
     }
-
-    close(client_fd);
 }
 
 std::string Server::handleRequest(const std::string& request, bool isTCP) {
@@ -180,11 +150,9 @@ std::string Server::handleRequest(const std::string& request, bool isTCP) {
     iss >> command;
 
     if (command == "SNG") {
-        // return handleStartGame(iss);
-        return "TODO";
+        return handleStartGame(iss);
     } else if (command == "TRY") {
-        // return handleTry(iss);
-        return "TODO";
+        return handleTry(iss);
     } else if (command == "QUT") {
         // return handleQuit(iss);
         return "TODO";
@@ -201,22 +169,134 @@ std::string Server::handleRequest(const std::string& request, bool isTCP) {
     return "ERR\n";
 }
 
-// std::string Server::handleStartGame(std::istringstream& iss) {
-//     std::string plid;
-//     int time;
-//     iss >> plid >> time;
+std::string Server::handleStartGame(std::istringstream& iss) {
+    std::string plid;
+    int time;
+    
+    if (!(iss >> plid >> time)) {
+        std::cerr << "Failed to parse SNG command\n";
+        return "RSG ERR\n";
+    }
 
-//     if (plid.length() != 6 || time <= 0 || time > 600) {
-//         return "RSG ERR\n";
-//     }
+    if (plid.length() != 6 || time <= 0 || time > 600) {
+        std::cerr << "Invalid SNG command\n";
+        return "RSG ERR\n";
+    }
 
-//     if (activeGames.find(plid) != activeGames.end()) {
-//         return "RSG NOK\n";
-//     }
+    auto it = activeGames.find(plid);
+    if (it != activeGames.end() && it->second.isActive()) {
+        std::cerr << "Duplicate SNG command(player " << plid 
+                  << " already has an ongoing game\n";
+        return "RSG NOK\n";
+    }
 
-//     activeGames.emplace(plid, Game(plid, time));
-//     return "RSG OK " + activeGames[plid].getSecretKey() + "\n";
-// }
+    // Create game object and insert it into the map
+    Game newGame(plid, time);
+    std::string key = newGame.getSecretKey();
+    activeGames.insert(std::make_pair(plid, std::move(newGame)));
+    std::cout << "New game started for player " << plid 
+              << "with key: " << key << "\n";
+    return "RSG OK\n";
+}
+
+
+std::string Server::handleTry(std::istringstream& iss) {
+    std::string plid, c1, c2, c3, c4;
+    int trialNum;
+    
+    // Parse input
+    if (!(iss >> plid >> c1 >> c2 >> c3 >> c4 >> trialNum)) {
+        return "RTR ERR\n";
+    }
+
+    // Validate PLID and find game
+    auto it = activeGames.find(plid);
+    if (it == activeGames.end() || !it->second.isActive()) {
+        return "RTR NOK\n";
+    }
+
+    Game& game = it->second;
+    std::string guess = c1 + " " + c2 + " " + c3 + " " + c4;
+    std::string secret = game.getSecretKey();
+
+    // Check for timeout
+    if (game.isTimeExceeded()) {
+        game.setActive(false);
+        return "RTR ETM " + secret + "\n";
+    }
+
+    // Validate trial number
+    int expectedTrials = game.getTrialCount() + 1;
+    if (trialNum == expectedTrials - 1) {
+        // Check if this is a resend of the last trial
+        const auto& trials = game.getTrials();
+        if (!trials.empty() && trials.back() == guess) {
+            // Calculate scores for resend
+            int nB = 0, nW = 0;
+            countMatches(guess, secret, nB, nW);
+            return "RTR OK " + std::to_string(trialNum) + " " + 
+                   std::to_string(nB) + " " + std::to_string(nW) + "\n";
+        }
+        return "RTR INV\n";
+    } else if (trialNum != expectedTrials) {
+        return "RTR INV\n";
+    }
+
+    // Check for duplicate trial
+    const auto& trials = game.getTrials();
+    if (std::find(trials.begin(), trials.end(), guess) != trials.end()) {
+        return "RTR DUP\n";
+    }
+
+    // Add trial and check if max attempts reached
+    game.addTrial(guess);
+    if (game.getTrialCount() >= MAX_ATTEMPTS) {
+        game.setActive(false);
+        return "RTR ENT " + secret + "\n";
+    }
+
+    // Calculate matches
+    int nB = 0, nW = 0;
+    countMatches(guess, secret, nB, nW);
+
+    // Check for win condition
+    if (nB == 4) {
+        game.setActive(false);
+        scoreboard.push_back({plid, game.getTrialCount()});
+        return "RTR WIN\n";
+    }
+
+    return "RTR OK " + std::to_string(trialNum) + " " + 
+           std::to_string(nB) + " " + std::to_string(nW) + "\n";
+}
+
+void Server::countMatches(const std::string& guess, const std::string& secret, 
+                         int& nB, int& nW) {
+    std::string tempSecret = secret;
+    std::string tempGuess = guess;
+    
+    // Count exact matches (nB)
+    nB = 0;
+    for (size_t i = 0; i < guess.length(); i++) {
+        if (guess[i] == secret[i]) {
+            nB++;
+            tempGuess[i] = 'X';
+            tempSecret[i] = 'Y';
+        }
+    }
+    
+    // Count wrong position matches (nW)
+    nW = 0;
+    for (size_t i = 0; i < tempGuess.length(); i++) {
+        if (tempGuess[i] == 'X') continue;
+        
+        size_t pos = tempSecret.find(tempGuess[i]);
+        if (pos != std::string::npos) {
+            nW++;
+            tempSecret[pos] = 'Y';
+        }
+    }
+}
 
 // std::string Server::handleTry(std::istringstream& iss) {
 //     std::string plid, guess;
@@ -325,13 +405,13 @@ std::string Server::handleRequest(const std::string& request, bool isTCP) {
 // }
 
 int main(int argc, char* argv[]) {
-    if (argc != 2) {
-        cerr << "Usage: " << argv[0] << " <port>" << endl;
-        return 1;
+    int port = DSPORT_DEFAULT;
+    if (argc > 1) {
+        port = stoi(argv[1]);
     }
 
     try {
-        Server server(std::stoi(argv[1]));
+        Server server(port);
     } catch (const std::exception& e) {
         std::cerr << "Error: " << e.what() << std::endl;
         return 1;
