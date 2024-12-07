@@ -3,6 +3,7 @@
 #include "../utils.hpp"
 #include <cstdlib>
 #include <algorithm>
+#include <random>
 
 using namespace std;
 
@@ -14,11 +15,15 @@ Game::Game(const std::string& pid, int maxPlayTime)
 }
 
 void Game::generateSecretKey() {
-    const std::vector<char> colors = {'R', 'G', 'B', 'Y', 'O', 'P'};  // Valid colors
+    const std::vector<char> colors = {'R', 'G', 'B', 'Y', 'O', 'P'};
+    std::random_device rd;
+    std::mt19937 gen(rd());
+    std::uniform_int_distribution<> dis(0, colors.size() - 1);
+
     secretKey = "";
     for(int i = 0; i < 4; i++) {
-        if (i > 0) secretKey += " ";  // Add space between colors
-        secretKey += colors[rand() % colors.size()];  // Randomly select a color
+        if (i > 0) secretKey += " "; 
+        secretKey += colors[dis(gen)]; 
     }
 }
 
@@ -123,9 +128,10 @@ void Server::handleConnections() {
         std::string message = protocols::receiveUDPMessage(ufd, &client_addr, &addrlen);
         std::string response = handleRequest(message, false);
         
-        // Send response back to client
-        sendto(ufd, response.c_str(), response.length(), 0,
-               (struct sockaddr*)&client_addr, addrlen);
+        // Send response back to client(falta usar sendUDPMessage !!!!!!!!!!!!)
+            sendto(ufd, response.c_str(), response.length(), 0,
+                   (struct sockaddr*)&client_addr, addrlen);
+        }
     }
     
     if (FD_ISSET(tfd, &testfds)) {
@@ -137,7 +143,7 @@ void Server::handleConnections() {
             std::string message = protocols::receiveTCPMessage(client_fd);
             std::string response = handleRequest(message, true);
             
-            // Send response back to client
+            // Send response back to client(AQUI TAMBEM!!!!!!!!)
             write(client_fd, response.c_str(), response.length());
             close(client_fd);
         }
@@ -154,11 +160,9 @@ std::string Server::handleRequest(const std::string& request, bool isTCP) {
     } else if (command == "TRY") {
         return handleTry(iss);
     } else if (command == "QUT") {
-        // return handleQuit(iss);
-        return "TODO";
+        return handleQuitExit(iss);
     } else if (command == "DBG") {
-        // return handleDebug(iss);
-        return "TODO";
+        return handleDebug(iss);
     } else if (command == "STR" && isTCP) {
         // return handleShowTrials(iss);
         return "TODO";
@@ -171,6 +175,7 @@ std::string Server::handleRequest(const std::string& request, bool isTCP) {
 
 std::string Server::handleStartGame(std::istringstream& iss) {
     std::string plid;
+    std::string key;
     int time;
     
     if (!(iss >> plid >> time)) {
@@ -188,14 +193,19 @@ std::string Server::handleStartGame(std::istringstream& iss) {
         std::cerr << "Duplicate SNG command(player " << plid 
                   << " already has an ongoing game\n";
         return "RSG NOK\n";
+    } else {
+        // Erase the existing game
+        if (it != activeGames.end()) {
+            activeGames.erase(it);
+        }
+        // Create a new game
+        Game newGame(plid, time);
+        key = newGame.getSecretKey();
+        activeGames.insert(std::make_pair(plid, std::move(newGame)));
     }
 
-    // Create game object and insert it into the map
-    Game newGame(plid, time);
-    std::string key = newGame.getSecretKey();
-    activeGames.insert(std::make_pair(plid, std::move(newGame)));
-    std::cout << "New game started for player " << plid 
-              << "with key: " << key << "\n";
+    std::cout << "PLID: " << plid << ": new game (max " << time << " sec);"
+              << " Colors: " << key << "\n";
     return "RSG OK\n";
 }
 
@@ -206,6 +216,20 @@ std::string Server::handleTry(std::istringstream& iss) {
     
     // Parse input
     if (!(iss >> plid >> c1 >> c2 >> c3 >> c4 >> trialNum)) {
+        std::cerr << "Failed to parse TRY command\n";
+        return "RTR ERR\n";
+    }
+
+    // Validate PLID format
+    if (!isValidPlid(plid)) {
+        std::cerr << "Invalid TRY command\n";
+        return "RTR ERR\n";
+    }
+
+    // Validate colors
+    if (!isValidColor(c1) || !isValidColor(c2) || 
+        !isValidColor(c3) || !isValidColor(c4)) {
+        std::cerr << "Invalid TRY command\n";
         return "RTR ERR\n";
     }
 
@@ -216,7 +240,7 @@ std::string Server::handleTry(std::istringstream& iss) {
     }
 
     Game& game = it->second;
-    std::string guess = c1 + " " + c2 + " " + c3 + " " + c4;
+    std::string guess = formatColors(c1, c2, c3, c4);
     std::string secret = game.getSecretKey();
 
     // Check for timeout
@@ -233,9 +257,11 @@ std::string Server::handleTry(std::istringstream& iss) {
         if (!trials.empty() && trials.back() == guess) {
             // Calculate scores for resend
             int nB = 0, nW = 0;
-            countMatches(guess, secret, nB, nW);
+            countMatches(c1, c2, c3, c4, secret, nB, nW);
+            cout << "PLID: " << plid << ":try " << c1 << " " << c2 << " " << c3 
+            << " " << c4 << " nB: " << nB << " nW: " << nW << " not guessed\n";
             return "RTR OK " + std::to_string(trialNum) + " " + 
-                   std::to_string(nB) + " " + std::to_string(nW) + "\n";
+                    std::to_string(nB) + " " + std::to_string(nW) + "\n";
         }
         return "RTR INV\n";
     } else if (trialNum != expectedTrials) {
@@ -257,152 +283,145 @@ std::string Server::handleTry(std::istringstream& iss) {
 
     // Calculate matches
     int nB = 0, nW = 0;
-    countMatches(guess, secret, nB, nW);
+    countMatches(c1, c2, c3, c4, secret, nB, nW);
 
     // Check for win condition
     if (nB == 4) {
         game.setActive(false);
         scoreboard.push_back({plid, game.getTrialCount()});
-        return "RTR WIN\n";
+        cout << "PLID: " << plid << ":try " << c1 << " " << c2 << " " << c3 
+        << " " << c4 << " nB: " << nB << " nW: " << nW << " Win (game ended)\n";
+        return "RTR OK " + std::to_string(trialNum) + " 4 0\n";
     }
-
+    
     return "RTR OK " + std::to_string(trialNum) + " " + 
-           std::to_string(nB) + " " + std::to_string(nW) + "\n";
+            std::to_string(nB) + " " + std::to_string(nW) + "\n";
 }
 
-void Server::countMatches(const std::string& guess, const std::string& secret, 
-                         int& nB, int& nW) {
-    std::string tempSecret = secret;
-    std::string tempGuess = guess;
+void Server::countMatches(const std::string& c1, const std::string& c2,
+                 const std::string& c3, const std::string& c4,
+                 const std::string& secret,
+                 int& nB, int& nW) {
+    std::istringstream iss(secret);
+    std::vector<std::string> secretColors;
+    std::string color;
+    
+    // Parse secret key into individual colors
+    while (iss >> color) {
+        secretColors.push_back(color);
+    }
+    
+    std::vector<std::string> guess = {c1, c2, c3, c4};
+    std::vector<bool> usedGuess(4, false);
+    std::vector<bool> usedSecret(4, false);
     
     // Count exact matches (nB)
     nB = 0;
-    for (size_t i = 0; i < guess.length(); i++) {
-        if (guess[i] == secret[i]) {
+    for (size_t i = 0; i < 4; i++) {
+        if (guess[i] == secretColors[i]) {
             nB++;
-            tempGuess[i] = 'X';
-            tempSecret[i] = 'Y';
+            usedGuess[i] = true;
+            usedSecret[i] = true;
         }
     }
     
     // Count wrong position matches (nW)
     nW = 0;
-    for (size_t i = 0; i < tempGuess.length(); i++) {
-        if (tempGuess[i] == 'X') continue;
+    for (size_t i = 0; i < 4; i++) {
+        if (usedGuess[i]) continue;
         
-        size_t pos = tempSecret.find(tempGuess[i]);
-        if (pos != std::string::npos) {
-            nW++;
-            tempSecret[pos] = 'Y';
+        for (size_t j = 0; j < 4; j++) {
+            if (!usedSecret[j] && guess[i] == secretColors[j]) {
+                nW++;
+                usedSecret[j] = true;
+                break;
+            }
         }
     }
 }
+bool Server::isValidColor(const std::string& color) {
+        return VALID_COLORS.find(color) != VALID_COLORS.end();
+}
 
-// std::string Server::handleTry(std::istringstream& iss) {
-//     std::string plid, guess;
-//     iss >> plid >> guess;
+bool Server::isValidPlid(const std::string& plid) {
+    // PLID should be exactly 6 digits
+    if (plid.length() != 6) return false;
+    return std::all_of(plid.begin(), plid.end(), ::isdigit);
+}
+std::string Server::formatColors(const std::string& c1, const std::string& c2, 
+                           const std::string& c3, const std::string& c4) {
+        return c1 + " " + c2 + " " + c3 + " " + c4;
+    }
 
-//     if (activeGames.find(plid) == activeGames.end()) {
-//         return "RTR ERR\n";
-//     }
+std::string Server::handleQuitExit(std::istringstream& iss) {
+    std::string plid;
 
-//     Game& game = activeGames[plid];
-//     if (!game.isActive() || game.isTimeExceeded()) {
-//         return "RTR ERR\n";
-//     }
+    if(!(iss >> plid)) {
+        std::cerr << "Failed to parse QUT command\n";
+    }
 
-//     if (guess.length() != 4 || !std::all_of(guess.begin(), guess.end(), ::isdigit)) {
-//         return "RTR ERR\n";
-//     }
+    // Validate PLID format
+    if (!isValidPlid(plid)) {
+        return "RTR ERR\n";
+    }
 
-//     game.addTrial(guess);
+    // Validate PLID and find game
+    auto it = activeGames.find(plid);
+    if (it == activeGames.end() || !it->second.isActive()) {
+        return "RTR NOK\n";
+    }
+
+    Game& game = it->second;
+    std::string secret = game.getSecretKey();
+    game.setActive(false);
+    return "RQT OK " + secret + "\n";
     
-//     if (guess == game.getSecretKey()) {
-//         game.setActive(false);
-//         scoreboard.push_back({plid, game.getTrialCount()});
-//         return "RTR WIN\n";
-//     }
+}
 
-//     int correctPos = 0;
-//     int correctDigits = 0;
-//     std::string secret = game.getSecretKey();
+std::string Server::handleDebug(std::istringstream& iss) {
+    std::string plid, c1, c2, c3, c4, key;
+    int time;
     
-//     // Count correct positions
-//     for (int i = 0; i < 4; i++) {
-//         if (guess[i] == secret[i]) correctPos++;
-//     }
-    
-//     // Count correct digits
-//     std::string tempSecret = secret;
-//     std::string tempGuess = guess;
-//     for (char c : tempGuess) {
-//         size_t pos = tempSecret.find(c);
-//         if (pos != std::string::npos) {
-//             correctDigits++;
-//             tempSecret[pos] = 'X';
-//         }
-//     }
+    // Parse input
+    if (!(iss >> plid >> time >> c1 >> c2 >> c3 >> c4)) {
+        std::cerr << "Failed to parse DBG command\n";
+        return "RDB ERR\n";
+    }
 
-//     return "RLG " + std::to_string(correctPos) + " " + std::to_string(correctDigits) + "\n";
-// }
+    // Validate PLID format
+    if (!isValidPlid(plid) || time <= 0 || time > 600) {
+        std::cerr << "Invalid DBG command\n";
+        return "RDB ERR\n";
+    }
 
-// std::string Server::handleQuit(std::istringstream& iss) {
-//     std::string plid;
-//     iss >> plid;
+    // Validate colors
+    if (!isValidColor(c1) || !isValidColor(c2) || 
+        !isValidColor(c3) || !isValidColor(c4)) {
+        std::cerr << "Invalid DBG command\n";
+        return "RDB ERR\n";
+    }
 
-//     auto it = activeGames.find(plid);
-//     if (it == activeGames.end() || !it->second.isActive()) {
-//         return "RQT ERR\n";
-//     }
+    // Check for existing active game
+    auto it = activeGames.find(plid);
+    key = formatColors(c1, c2, c3, c4);
+    if (it != activeGames.end() && it->second.isActive()) {
+        return "RDB NOK\n";
+    } else {
+        // Erase the existing game
+        if (it != activeGames.end()) {
+            activeGames.erase(it);
+        }
+        // Create a new game
+        Game newGame(plid, time);
+        newGame.setSecretKey(key);
+        activeGames.insert(std::make_pair(plid, std::move(newGame)));
+    }
 
-//     it->second.setActive(false);
-//     scoreboard.push_back({plid, it->second.getTrialCount()});
-//     return "RQT OK\n";
-// }
+    std::cout << "PLID: " << plid << ": new game (max " << time << " sec);"
+              << " Colors: " << key << "\n";
 
-// std::string Server::handleDebug(std::istringstream& iss) {
-//     std::string response = "Status of active games:\n";
-//     for (const auto& pair : activeGames) {
-//         response += "PLID: " + pair.first + 
-//                    " Secret: " + pair.second.getSecretKey() + 
-//                    " Active: " + (pair.second.isActive() ? "yes" : "no") + "\n";
-//     }
-//     return response;
-// }
-
-// std::string Server::handleShowTrials(std::istringstream& iss) {
-//     std::string plid;
-//     iss >> plid;
-
-//     auto it = activeGames.find(plid);
-//     if (it == activeGames.end()) {
-//         return "RGH ERR\n";
-//     }
-
-//     std::string response = "RGH OK " + std::to_string(it->second.getTrials().size());
-//     for (const auto& trial : it->second.getTrials()) {
-//         response += " " + trial;
-//     }
-//     response += "\n";
-//     return response;
-// }
-
-// std::string Server::handleScoreboard() {
-//     if (scoreboard.empty()) {
-//         return "RSB EMPTY\n";
-//     }
-
-//     // Sort scoreboard by number of trials (ascending)
-//     std::sort(scoreboard.begin(), scoreboard.end(),
-//               [](const auto& a, const auto& b) { return a.second < b.second; });
-
-//     std::string response = "RSB OK";
-//     for (const auto& score : scoreboard) {
-//         response += " " + score.first + " " + std::to_string(score.second);
-//     }
-//     response += "\n";
-//     return response;
-// }
+    return "RDB OK\n";
+}
 
 int main(int argc, char* argv[]) {
     int port = DSPORT_DEFAULT;

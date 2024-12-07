@@ -24,6 +24,7 @@ private:
     struct addrinfo hints;
     struct addrinfo *udpRes;
     struct addrinfo *tcpRes;
+    struct timeval timeout;
 
 public:
     GameClient(int argc, char** argv);
@@ -50,7 +51,7 @@ private:
     void handleTry(const std::string& command);
     void handleShowTrials();
     void handleScoreboard();
-    int handleQuitExit();
+    void handleQuitExit();
     void handleDebug(const std::string& command);
 };
 

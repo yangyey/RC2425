@@ -47,27 +47,23 @@ namespace protocols {
     }
 
     std::string receiveUDPMessage(int sock, struct sockaddr_in* client_addr, socklen_t* addrlen) {
-    char buffer[BUFFER_SIZE];
-    ssize_t n = -1;
-    int retryCount = 0;
-
-    // Retry up to 3 times
-    while (retryCount < 3) {
-        n = recvfrom(sock, buffer, sizeof(buffer) - 1, 0,
-                    (struct sockaddr*)client_addr, addrlen);
+        char buffer[BUFFER_SIZE];
+        ssize_t n = recvfrom(sock, buffer, sizeof(buffer) - 1, 0,
+                            (struct sockaddr*)client_addr, addrlen);
 
         if (n == -1) {
-            retryCount++;
-            sleep(1);
-            continue;
+            if (errno == EAGAIN || errno == EWOULDBLOCK) {
+                std::cerr << "Timeout, please retry\n";
+            } else {
+                std::cerr << "Error receiving message: " << strerror(errno) << "\n";
+            }
+            return "";
         }
+
         if (n >= 0 && n < BUFFER_SIZE) {
             buffer[n] = '\0';
             return std::string(buffer);
         }
-        break;
+        return "";
     }
-    
-    return "";  // Return empty string on error
-}
 }

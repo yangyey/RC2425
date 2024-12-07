@@ -32,8 +32,15 @@ void GameClient::parseArguments(int argc, char** argv) {
 
 void GameClient::setupUDPSocket() {
     udpSocket = socket(AF_INET, SOCK_DGRAM, 0);
+    timeout.tv_sec = 5;  // 3 second timeout
+    timeout.tv_usec = 0;
+
     if (udpSocket == -1) {
         std::cerr << "Error creating UDP socket.\n";
+        exit(EXIT_FAILURE);
+    }
+    if (setsockopt(udpSocket, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout)) < 0) {
+        std::cerr << "setsockopt failed\n";
         exit(EXIT_FAILURE);
     }
 
@@ -176,6 +183,9 @@ int GameClient::handleResponse(const string response) {
             return SUCCESS;
         } else if (strcmp(subStatus, "NOK") == 0) {
             fprintf(stdout, "Failed to start game: Player has an ongoing game.\n");
+            return FAIL;
+        } else if (strcmp(subStatus, "ERR") == 0) {
+            fprintf(stdout, "Failed to start game: Invalid arguments.\n");
             return FAIL;
         }
     } else if (strcmp(status, "RTR") == 0) {
@@ -365,11 +375,16 @@ void GameClient::handleScoreboard() {
     closeTCPSocket();
 }
 
-int GameClient::handleQuitExit() {
-    std::string qutCommand = "QUT " + plid + "\n";
+void GameClient::handleQuitExit() {
+    std::string qutCommand;
+    if(!plid.empty()) {
+        qutCommand = "QUT " + plid + "\n";
+    } else {
+        qutCommand = "QUT\n";
+    }
     sendUDPMessage(udpSocket, qutCommand, udpRes);
     std::string response = receiveUDPMessage(udpSocket, (struct sockaddr_in*)udpRes->ai_addr, &udpRes->ai_addrlen);
-    return 0;
+    handleResponse(response);
 }
 
 void GameClient::handleDebug(const std::string& command) {
@@ -384,8 +399,8 @@ void GameClient::handleDebug(const std::string& command) {
     snprintf(dbgCommand, sizeof(dbgCommand), "DBG %s %d %s %s %s %s\n", plid.c_str(), maxPlayTime, C1, C2, C3, C4);
     sendUDPMessage(udpSocket, dbgCommand, udpRes);
     std::string response = receiveUDPMessage(udpSocket, (struct sockaddr_in*)udpRes->ai_addr, &udpRes->ai_addrlen);
-    handleResponse(response);
-    fprintf(stdout, "Debug game started with duration %d seconds and secret key %s %s %s %s.\n", maxPlayTime, C1, C2, C3, C4);
+    if(handleResponse(response) == SUCCESS)
+        fprintf(stdout, "Debug game started with duration %d seconds and secret key %s %s %s %s.\n", maxPlayTime, C1, C2, C3, C4);
 }
 
 void GameClient::handleCommands() {
@@ -408,7 +423,12 @@ void GameClient::handleCommands() {
         } else if (strcmp(command, "scoreboard") == 0 || strcmp(command, "sb") == 0) {
             handleScoreboard();
         } else if (strcmp(command, "exit") == 0 || strcmp(command, "quit") == 0) {
-            if (handleQuitExit() == 0) break;
+            handleQuitExit();
+            if (strcmp(command, "quit") == 0) {
+                continue;
+            } else {
+                break;
+            }
         } else if (strncmp(command, "debug", 5) == 0) {
             handleDebug(command);
         } else {
