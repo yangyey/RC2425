@@ -1,23 +1,18 @@
 #include "server.hpp"
 #include "../constant.hpp"
 #include "../utils.hpp"
-#include <cstdlib>
-#include <algorithm>
-#include <random>
+
+
 
 using namespace std;
 
 // Game implementation
 Game::Game(const std::string& pid, int maxPlayTime, char mode)
-    : plid(pid), maxTime(maxPlayTime), active(false), gameMode(mode) {
+    : plid(pid), maxTime(maxPlayTime), active(true), gameMode(mode) {
     startTime = time(nullptr);
     generateSecretKey();
     saveInitialState();
 
-}
-
-std::string Game::getGameFilePath() const {
-    return "GAMES/GAME_" + plid + ".txt";
 }
 
 void Game::saveInitialState() const {
@@ -62,8 +57,17 @@ void Game::finalizeGame(char endCode) {
     if (!active) return;
     active = false;
     
+    // Save score file only for winning games
+    if (endCode == 'W') {
+        try {
+            saveScoreFile();
+        } catch (const std::exception& e) {
+            std::cerr << "Error saving score file: " << e.what() << std::endl;
+        }
+    }
+    
     // Create player directory if needed
-    std::string playerDir = "GAMES/" + plid;
+    std::string playerDir = "Server/GAMES/" + plid;
     mkdir(playerDir.c_str(), 0777);
 
     // Add final timestamp line
@@ -101,8 +105,49 @@ void Game::generateSecretKey() {
     }
 }
 
-bool Game::isTimeExceeded() {
-    return (time(nullptr) - startTime) > maxTime;
+int Game::calculateScore() const {
+    // Calculate time component (0-50 points)
+    time_t now = time(nullptr);
+    int timeTaken = now - startTime;
+    double timePercentage = std::max(0.0, 1.0 - (double)timeTaken / maxTime);
+    int timeScore = static_cast<int>(timePercentage * 50);
+
+    // Calculate trials component (0-50 points)
+    double trialsPercentage = 1.0 - (double)trials.size() / MAX_ATTEMPTS;
+    int trialScore = static_cast<int>(trialsPercentage * 50);
+
+    // Combine scores and ensure bounds
+    return std::min(100, std::max(0, timeScore + trialScore));
+}
+
+void Game::saveScoreFile() const {
+    time_t now = time(nullptr);
+    struct tm* timeinfo = gmtime(&now);
+    char timeStr[30];
+    strftime(timeStr, sizeof(timeStr), "%d%m%Y_%H%M%S", timeinfo);
+    
+    int score = calculateScore();
+    
+    // Format: "NNN PLID DDMMYYYY HHMMSS.txt"
+    std::string scoreFileName = "Server/SCORES/" + 
+                               std::to_string(score) + "_" +
+                               plid + "_" +
+                               std::string(timeStr) + ".txt";
+                               
+    std::ofstream scoreFile(scoreFileName);
+    if (!scoreFile) {
+        throw std::runtime_error("Cannot create score file");
+    }
+    
+    // Format: "SSS PPPPPP CCCC N mode"
+    scoreFile << std::setfill('0') << std::setw(3) << score << " "
+              << plid << " "
+              << secretKey << " "
+              << trials.size() << " "
+              << (gameMode == 'D' ? "DEBUG" : "PLAY")
+              << std::endl;
+              
+    scoreFile.close();
 }
 
 // Server implementation
@@ -115,7 +160,7 @@ Server::Server(int port) : running(true) {
 
 void Server::setupDirectory() {
     // Create GAMES directory if it doesn't exist
-    if (mkdir("GAMES", 0777) == -1) {
+    if (mkdir("Server/GAMES", 0777) == -1) {
         if (errno != EEXIST) {
             perror("Error creating GAMES directory");
             exit(EXIT_FAILURE);
@@ -123,7 +168,7 @@ void Server::setupDirectory() {
     }
 
     // Create SCORES directory if it doesn't exist
-    if (mkdir("SCORES", 0777) == -1) {
+    if (mkdir("Server/SCORES", 0777) == -1) {
         if (errno != EEXIST) {
             perror("Error creating SCORES directory");
             exit(EXIT_FAILURE);
@@ -208,55 +253,52 @@ void Server::run() {
             continue;
         }
 
-        handleConnections();
-    }
-}
-
-void Server::handleConnections() {
-    if (FD_ISSET(ufd, &testfds)) {
-        struct sockaddr_in client_addr;
-        socklen_t addrlen = sizeof(client_addr);
-        std::string message = protocols::receiveUDPMessage(ufd, &client_addr, &addrlen);
-        std::string response = handleRequest(message, false);
-        
-        // Send response back to client(falta usar sendUDPMessage !!!!!!!!!!!!)(Mudar o sendto para sendUDPMessage)
-            sendto(ufd, response.c_str(), response.length(), 0,
-                   (struct sockaddr*)&client_addr, addrlen);
-    }
-    
-    
-    if (FD_ISSET(tfd, &testfds)) {
-        struct sockaddr_in client_addr;
-        socklen_t addrlen = sizeof(client_addr);
-        int client_fd = accept(tfd, (struct sockaddr*)&client_addr, &addrlen);
-        
-        if (client_fd >= 0) {
-            std::string message = protocols::receiveTCPMessage(client_fd);
-            std::string response = handleRequest(message, true);
+        if (FD_ISSET(ufd, &testfds)) {
+            struct sockaddr_in client_addr;
+            socklen_t addrlen = sizeof(client_addr);
+            std::string message = protocols::receiveUDPMessage(ufd, &client_addr, &addrlen);
+            std::string response = handleRequest(message, false);
             
-            // Send response back to client(AQUI TAMBEM!!!!!!!!)(mudar o write para sendTCPMessage)
-            write(client_fd, response.c_str(), response.length());
-            close(client_fd);
+            protocols::sendUDPMessage(ufd, response, &client_addr, addrlen);
+        }
+    
+    
+        if (FD_ISSET(tfd, &testfds)) {
+            struct sockaddr_in client_addr;
+            socklen_t addrlen = sizeof(client_addr);
+            int client_fd = accept(tfd, (struct sockaddr*)&client_addr, &addrlen);
+            
+            if (client_fd >= 0) {
+                std::string message = protocols::receiveTCPMessage(client_fd);
+                std::string response = handleRequest(message, true);
+                
+                protocols::sendTCPMessage(client_fd, response);
+
+                // Send response back to client(AQUI TAMBEM!!!!!!!!)(mudar o write para sendTCPMessage)
+                // write(client_fd, response.c_str(), response.length());
+                close(client_fd);
+            }
         }
     }
 }
+
 
 std::string Server::handleRequest(const std::string& request, bool isTCP) {
     char command[10];
     sscanf(request.c_str(), "%s", command);
 
-    if (strcmp(command, "SNG") == 0) {
+    if (strcmp(command, REQUEST_START) == 0) {
         return handleStartGame(request);
-    } else if (strcmp(command, "TRY") == 0) {
+    } else if (strcmp(command, REQUEST_TRY) == 0) {
         return handleTry(request);
-    } else if (strcmp(command, "QUT") == 0) {
+    } else if (strcmp(command, REQUEST_QUIT) == 0) {
         return handleQuitExit(request);
-    } else if (strcmp(command, "DBG") == 0) {
+    } else if (strcmp(command, REQUEST_DEBUG) == 0) {
         return handleDebug(request);
-    } else if (strcmp(command, "STR") == 0 && isTCP) {
-        return "TODO";
-    } else if (strcmp(command, "SSB") == 0 && isTCP) {
-        return "TODO";
+    } else if (strcmp(command, REQUEST_SHOW_TRIALS) == 0 && isTCP) {
+        return handleShowTrials(request);
+    } else if (strcmp(command, REQUEST_SCOREBOARD) == 0 && isTCP) {
+        return handleScoreBoard(request);
     }
     return "ERR\n";
 }
@@ -277,7 +319,7 @@ std::string Server::handleStartGame(const std::string& request) {
 
     auto it = activeGames.find(plid);
     // Check if player has an active game
-    if (it != activeGames.end() && it->second.isActive()) {
+    if (it != activeGames.end() ) {
         return "RSG NOK\n";
     }
     // Create a new game
@@ -326,9 +368,9 @@ std::string Server::handleTry(const std::string& request) {
     }
 
     // Activate game if it's the first trial
-    if (trialNum == 1) {
-        it->second.setActive(true);
-    }
+    // if (trialNum == 1) {
+        // it->second.setActive(true);
+    // }
 
     std::string secretKey;
     secretKey = it->second.getSecretKey();
@@ -336,6 +378,7 @@ std::string Server::handleTry(const std::string& request) {
     // Check if game has timed out
     if (it->second.isTimeExceeded()) {
         it->second.finalizeGame('T');
+        activeGames.erase(it);
         return "RTR ETM " + secretKey + "\n";
     }
 
@@ -374,12 +417,14 @@ std::string Server::handleTry(const std::string& request) {
     
     if (game.getTrialCount() >= MAX_ATTEMPTS) {
         game.finalizeGame('F');
+        activeGames.erase(it);
         return "RTR ENT " + secretKey + "\n";
     }
 
     // Check for win condition
     if (nB == 4) {
         game.finalizeGame('W');
+        activeGames.erase(it);
         cout << "PLID: " << plid << ":try " << c1 << " " << c2 << " " << c3 
              << " " << c4 << " nB: " << nB << " nW: " << nW << " Win (game ended)\n";
         return "RTR OK " + std::to_string(trialNum) + " 4 0\n";
@@ -456,11 +501,12 @@ std::string Server::handleQuitExit(const std::string& request) {
 
     // Check if game exists
     auto it = activeGames.find(plid);
-    if (it == activeGames.end() || !it->second.isActive()) {
+    if (it == activeGames.end()) {
         return "RQT NOK\n";
     }
 
     try {
+        activeGames.erase(it); // Remove the game from active games
         Game& game = it->second;
         std::string secretKey = game.getSecretKey();
         game.finalizeGame('Q');
@@ -496,7 +542,7 @@ std::string Server::handleDebug(const std::string& request) {
     
     // Check for active game
     auto it = activeGames.find(plid);
-    if (it != activeGames.end() && it->second.isActive()) {
+    if (it != activeGames.end()) {
         return "RDB NOK\n";
     }
 
@@ -515,6 +561,301 @@ std::string Server::handleDebug(const std::string& request) {
         std::cerr << "Error creating debug game: " << e.what() << std::endl;
         return "RDB ERR\n";
     }
+}
+
+std::string Server::handleShowTrials(const std::string& request) {
+    char plid[7];
+    
+    if (sscanf(request.c_str(), "STR %s", plid) != 1) {
+        std::cerr << "Failed to parse STR command\n";
+        return "RST NOK\n";
+    }
+
+    if (!isValidPlid(plid)) {
+        return "RST NOK\n";
+    }
+
+    // Check for active game first
+    auto it = activeGames.find(plid);
+    if (it != activeGames.end() && it->second.isActive()) {
+        return processActiveGame(plid, it->second);
+    }
+
+    // No active game - look for finished game
+    return processFinishedGame(plid);
+}
+
+std::vector<std::string> Server::readGameFile(const std::string& filePath) {
+    std::vector<std::string> lines;
+    std::ifstream file(filePath);
+    if (!file) {
+        throw std::runtime_error("Cannot open game file");
+    }
+    
+    std::string line;
+    while (std::getline(file, line)) {
+        lines.push_back(line);
+    }
+    
+    if (lines.empty()) {
+        throw std::runtime_error("Empty game file");
+    }
+    
+    return lines;
+}
+
+std::string Server::formatGameHeader(const std::string& plid, const std::string& date, 
+                                   const std::string& time, int maxTime) {
+    std::stringstream ss;
+    ss << "     Active game found for player " << plid << "\n"
+       << "Game initiated: " << date << " " << time 
+       << " with " << maxTime << " seconds to be completed\n\n";
+    return ss.str();
+}
+
+std::string Server::formatTrials(const std::vector<std::string>& lines) {
+    std::vector<std::string> trials;
+    for (const auto& line : lines) {
+        if (line.substr(0, 2) == "T:") {
+            trials.push_back(line);
+        }
+    }
+
+    std::stringstream ss;
+    ss << "     --- Transactions found: " << trials.size() << " ---\n\n";
+
+    for (const auto& trial : lines) {
+        if (trial.substr(0, 2) == "T:") {
+            char c1, c2, c3, c4;
+            int nB, nW, seconds;
+            if (sscanf(trial.c_str(), "T: %c %c %c %c %d %d %d", 
+                      &c1, &c2, &c3, &c4, &nB, &nW, &seconds) == 7) {
+                ss << "Trial: " << c1 << c2 << c3 << c4 
+                   << ", nB: " << nB << ", nW: " << nW 
+                   << " at " << std::setw(3) << seconds << "s\n";
+            }
+        }
+    }
+    ss << "\n";
+    return ss.str();
+}
+
+std::string Server::formatRemainingTime(int remainingTime) {
+    std::stringstream ss;
+    ss << "  -- " << remainingTime << " seconds remaining to be completed -- \n";
+    return ss.str();
+}
+
+std::string Server::processActiveGame(const std::string& plid, Game& game) {
+    try {
+        std::vector<std::string> lines = readGameFile(game.getGameFilePath());
+        if (lines.empty()) {
+            return "RST NOK\n";
+        }
+
+        // Parse header line: PLID MODE C1 C2 C3 C4 TIME DATE TIME TIMESTAMP
+        char mode;
+        int maxTime;
+        char date[11], realTime[9];  // YYYY-MM-DD + null, HH:MM:SS + null
+        time_t startTime;
+        if (sscanf(lines[0].c_str(), "%*s %c %*s %*s %*s %*s %d %s %s %ld",
+                  &mode, &maxTime, date, realTime, &startTime) < 5) {
+            return "RST NOK\n";
+        }
+
+        // Format header
+        std::string content = formatGameHeader(plid, date, realTime, maxTime);
+
+        // Format trials
+        content += formatTrials(lines);
+        
+        // Add remaining time
+        int remainingTime = maxTime - (time(nullptr) - startTime);
+        content += formatRemainingTime(remainingTime);
+
+        return "RST ACT STATE_" + plid + ".txt " +
+               std::to_string(content.length()) + " " + content;
+    } catch (const std::exception& e) {
+        std::cerr << "Error processing active game: " << e.what() << std::endl;
+        return "RST NOK\n";
+    }
+}
+
+std::string Server::processFinishedGame(const std::string& plid) {
+    char fname[256];
+    char terminated[2];
+    std::string termination;
+    if (!FindLastGame(plid.c_str(), fname)) {
+        return "RST NOK\n";
+    }
+    char* last_underscore = strrchr(fname, '_');
+    if (last_underscore != nullptr) {
+        terminated[0] = *(last_underscore + 1);  // Get the character after the last underscore
+        terminated[1] = '\0';
+    }
+
+    if (terminated[0] == 'W') {
+        termination = "WIN";
+    } else if (terminated[0] == 'F') {
+        termination = "FAIL";
+    } else if (terminated[0] == 'T') {
+        termination = "TIMEOUT";
+    } else if (terminated[0] == 'Q') {
+        termination = "QUIT";
+    } else {
+        termination = "UNKNOWN";
+    }
+
+    try {
+        std::vector<std::string> lines = readGameFile(fname);
+        if (lines.empty()) {
+            return "RST NOK\n";
+        }
+
+        // Parse header line
+        char mode;
+        int maxTime;
+        char date[11], time[9];
+        time_t startTime;
+        if (sscanf(lines[0].c_str(), "%*s %c %*s %*s %*s %*s %d %s %s %ld",
+                  &mode, &maxTime, date, time, &startTime) < 5) {
+            return "RST NOK\n";
+        }
+
+        std::string content = formatGameHeader(plid, date, time, maxTime);
+        content += formatTrials(lines);
+        
+        if (lines.size() >= 2) {
+            std::string lastLine = lines.back();
+            char date[11], time[9];  // YYYY-MM-DD + null, HH:MM:SS + null
+            int duration;
+            
+            if (sscanf(lastLine.c_str(), "%s %s %d", date, time, &duration) == 3) {
+                std::string timestamp = std::string(date) + " " + std::string(time);
+                content += "Termination: " + termination + " at " + timestamp + 
+                        ", Duration: " + std::to_string(duration) + "s\n";
+            }
+        }   
+
+        return "RST FIN STATE_" + plid + ".txt " + 
+               std::to_string(content.length()) + " " + content;
+    } catch (const std::exception& e) {
+        std::cerr << "Error processing finished game: " << e.what() << std::endl;
+        return "RST NOK\n";
+    }
+}
+
+int Server::FindLastGame(const char* PLID, char* fname) {
+    struct dirent** filelist;
+    int n_entries, found;
+    char dirname[50];
+
+    snprintf(dirname, sizeof(dirname), "Server/GAMES/%s/", PLID);
+
+    n_entries = scandir(dirname, &filelist, nullptr, alphasort);
+    found = 0;
+
+    if (n_entries <= 0) {
+        return 0;
+    } else {
+        while (n_entries-- > 0) {
+            if (filelist[n_entries]->d_name[0] != '.' && !found) {
+                sprintf(fname, "Server/GAMES/%s/%s", PLID, filelist[n_entries]->d_name);
+                found = 1;
+            }
+            free(filelist[n_entries]);
+        }
+        free(filelist);
+    }
+
+    return found;
+}
+
+std::string Server::handleScoreBoard(const std::string&) {
+    SCORELIST scores;
+    int numScores = FindTopScores(&scores);
+    
+    if (numScores == 0) {
+        return "RSS EMPTY\n";
+    }
+
+    // Get current time for filename
+    time_t now = time(nullptr);
+    struct tm* timeinfo = localtime(&now);
+    char timestamp[20];
+    strftime(timestamp, sizeof(timestamp), "%d%m%y_%H:%M:%S", timeinfo);
+    
+    // Create filename
+    std::string fileName = "TOP_10_SCORES_" + std::string(timestamp) + ".txt";
+
+    std::stringstream content;
+    
+    // Rest of the content formatting remains the same
+    content << "-------------------------------- TOP 10 SCORES --------------------------------\n\n"
+           << "                 SCORE PLAYER     CODE    NO TRIALS   MODE\n\n";
+
+    for (int i = 0; i < numScores; i++) {
+        content << "            " 
+                << std::right << std::setw(2) << (i + 1) << " - "
+                << std::right << std::setw(4) << scores.score[i] << "  "
+                << std::left << std::setw(10) << scores.PLID[i] << " "
+                << std::left << std::setw(8) << scores.col_code[i] << "    "
+                << std::right << std::setw(1) << scores.no_tries[i] << "       "
+                << std::left << scores.mode[i]
+                << "\n";
+    }
+    
+    content << "\n";
+    
+    std::string fileContent = content.str();
+    return "RSS OK " + fileName + " " + 
+           std::to_string(fileContent.length()) + " " + 
+           fileContent;
+}
+
+int Server::FindTopScores(SCORELIST* list) {
+    struct dirent** filelist;
+    int n_entries, i_file = 0;
+    char fname[300];
+    FILE* fp;
+    char mode[8];
+    char c1, c2, c3, c4;
+
+    // Scan SCORES directory for files
+    n_entries = scandir("Server/SCORES/", &filelist, nullptr, alphasort);
+    if (n_entries <= 0) {
+        return 0;
+    }
+
+    while (n_entries--) {
+        if (filelist[n_entries]->d_name[0] != '.' && i_file < 10) {
+            snprintf(fname, sizeof(fname), "Server/SCORES/%s", filelist[n_entries]->d_name);
+            fp = fopen(fname, "r");
+            if (fp != NULL) {
+                if (fscanf(fp, "%d %s %c %c %c %c %d %s",
+                           &list->score[i_file],
+                           list->PLID[i_file],
+                           &c1, &c2, &c3, &c4,
+                           &list->no_tries[i_file],
+                           mode) == 8) {
+                    sprintf(list->col_code[i_file], "%c%c%c%c", c1, c2, c3, c4);
+                    // Set mode based on the read value
+                    if (strcmp(mode, "PLAY") == 0) {
+                        strcpy(list->mode[i_file], "PLAY");
+                    } else if (strcmp(mode, "DEBUG") == 0) {
+                        strcpy(list->mode[i_file], "DEBUG");
+                    }
+                    i_file++;
+                }
+                fclose(fp);
+            }
+        }
+        free(filelist[n_entries]);
+    }
+    free(filelist);
+
+    list->n_scores = i_file;
+    return i_file;
 }
 
 int main(int argc, char* argv[]) {

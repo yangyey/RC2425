@@ -32,6 +32,7 @@ public:
 
 private:
     // Initialization/Termination
+    void setupDirectory();
     void parseArguments(int argc, char** argv);
     void setupUDPSocket();
     void closeUDPSocket();

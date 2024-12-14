@@ -1,0 +1,8 @@
+-------------------------------- TOP 10 SCORES --------------------------------
+
+                 SCORE PLAYER     CODE    NO TRIALS   MODE
+
+             1 -   92  123456     YGOP        1       PLAY
+             2 -   92  111111     RGBO        1       DEBUG
+             3 -   77  100000     OBPY        3       PLAY
+

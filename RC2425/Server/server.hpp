@@ -9,6 +9,10 @@
 #include <fstream>
 #include <iomanip>
 #include <unistd.h>
+#include <dirent.h>
+#include <cstdlib>
+#include <algorithm>
+#include <random>
 
 class Game {
 private:
@@ -24,6 +28,8 @@ private:
     // std::string getGameFilePath() const;
     // void saveInitialState() const;
     // void appendTrialToFile(const std::string& trial, int nB, int nW) const;
+    void saveScoreFile() const;
+    int calculateScore() const;
 
 public:
     // Constructor
@@ -31,7 +37,8 @@ public:
 
 
     // Methods engaging with file system
-    std::string getGameFilePath() const;
+    std::string getGameFilePath() const { return "Server/GAMES/GAME_" + plid + ".txt"; };
+    std::string formatTrialFileName() const { return "STATE_" + plid + ".txt"; };
     void saveInitialState() const;
     void appendTrialToFile(const std::string& trial, int nB, int nW) const;
     void finalizeGame(char endCode);
@@ -39,7 +46,7 @@ public:
 
     // Methods engaging with game state
     void generateSecretKey();
-    bool isTimeExceeded();
+    bool isTimeExceeded() { return (time(nullptr) - startTime) > maxTime; };
     bool isActive() const { return active; }
     void setActive(bool status) { active = status; }
     void setSecretKey(const std::string& newKey) { secretKey = newKey; }
@@ -47,10 +54,21 @@ public:
     const std::string& getSecretKey() const { return secretKey; }
     const std::vector<std::string>& getTrials() const { return trials; }
     int getTrialCount() const { return trials.size(); }
+    int getMaxTime() const { return maxTime; }
+    time_t getStartTime() const { return startTime; }
 };
 
 class Server {
-private:
+private:    
+    typedef struct {
+        int n_scores;
+        int score[10];
+        char PLID[10][7];
+        char col_code[10][5];
+        int no_tries[10];
+        char mode[10][6]; 
+    } SCORELIST;
+
     const int MAX_ATTEMPTS = 8;
     fd_set inputs, testfds;
     struct timeval timeout;
@@ -64,7 +82,6 @@ private:
 
     void setupDirectory();
     void setupSockets(int port);
-    void handleConnections();
     std::string handleRequest(const std::string& request, bool isTCP);
     std::string handleStartGame(const std::string& request);
     std::string handleTry(const std::string& request);
@@ -78,7 +95,18 @@ private:
                            const std::string& c3, const std::string& c4);
     std::string handleQuitExit(const std::string& request);
     std::string handleDebug(const std::string& request);
-    // std::string handleShowTrials(const std::string& request);
+    std::string handleShowTrials(const std::string& request);
+
+    std::string formatGameHeader(const std::string& plid, const std::string& date, 
+                               const std::string& time, int maxTime);
+    std::string formatTrials(const std::vector<std::string>& lines);
+    std::string formatRemainingTime(int remainingTime);
+    std::string processActiveGame(const std::string& plid, Game& game);
+    std::string processFinishedGame(const std::string& plid);
+    std::vector<std::string> readGameFile(const std::string& filePath);
+    int FindLastGame(const char* PLID, char* fname);
+    std::string handleScoreBoard(const std::string& request);
+    int FindTopScores(SCORELIST* list);
     // std::string handleScoreboard();
 
 public:

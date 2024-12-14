@@ -21,10 +21,9 @@
 namespace protocols {
 
     // Common send/receive functions
-    int sendTCPMessage(int sock, const std::string& message);
+    void sendTCPMessage(int sock, const std::string& message);
     std::string receiveTCPMessage(int sock);
-    void sendUDPMessage(int sock, const std::string& message, struct addrinfo* udpRes);
-    std::string receiveUDPMessage(int sock, struct addrinfo* udpRes);
+    void sendUDPMessage(int sock, const std::string& message, struct sockaddr_in* client_addr, socklen_t addrlen);
     std::string receiveUDPMessage(int sockfd, struct sockaddr_in* client_addr, socklen_t* addrlen);
 
     // Response status codes

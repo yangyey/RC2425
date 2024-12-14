@@ -15,12 +15,30 @@ GameClient::GameClient(int argc, char** argv)
       udpRes(nullptr), 
       tcpRes(nullptr) {
     
+    setupDirectory();
     parseArguments(argc, argv);
     setupUDPSocket();
     handleCommands();
     closeUDPSocket();
 }
 
+void GameClient::setupDirectory() {
+    // Create Game_History directory if it doesn't exist
+    if (mkdir("Client/Game_History", 0777) == -1) {
+        if (errno != EEXIST) {
+            perror("Error creating Game_History directory");
+            exit(EXIT_FAILURE);
+        }
+    }
+
+    // Create TOP_SCORE directory if it doesn't exist
+    if (mkdir("Client/Top_Scores", 0777) == -1) {
+        if (errno != EEXIST) {
+            perror("Error creating Top_Scores directory");
+            exit(EXIT_FAILURE);
+        }
+    }
+}
 void GameClient::parseArguments(int argc, char** argv) {
     if (argc > 1) {
         serverIP = argv[2];
@@ -61,37 +79,6 @@ void GameClient::closeUDPSocket() {
     close(udpSocket);
 }
 
-// void GameClient::sendUDPMessage(const string& message) {
-//     ssize_t n = sendto(udpSocket, message.c_str(), message.size(), 0, udpRes->ai_addr, udpRes->ai_addrlen);
-//     if (n == -1) {
-//         std::cerr << "Failed to send UDP message.\n";
-//         exit(1);
-//     }
-// }
-
-// std::string GameClient::receiveUDPMessage() {
-//     char buffer[BUFFER_SIZE];
-//     struct sockaddr_in server_addr;
-//     socklen_t addrlen = sizeof(server_addr);
-//     ssize_t n = -1;
-//     int retryCount = 0;
-
-//     // Retry up to 3 times
-//     while (retryCount < 3) {
-//         n = recvfrom(udpSocket, buffer, sizeof(buffer) - 1, 0,
-//                     (struct sockaddr*)&server_addr, &addrlen);
-
-//         if (n == -1) {
-//             retryCount++;
-//             std::this_thread::sleep_for(std::chrono::seconds(1));
-//             continue; // Retry on failure
-//         }
-//         // If received successfully, break out of the loop
-//         break;
-//     }
-//     buffer[n] = '\0';
-//     return std::string(buffer);
-// }
 
 void GameClient::setupTCPSocket() {
     tcpSocket = socket(AF_INET, SOCK_STREAM, 0);
@@ -118,54 +105,6 @@ void GameClient::setupTCPSocket() {
     }
 }
 
-// void GameClient::sendTCPMessage(const string& message) {
-//     size_t totalSent = 0;
-//     size_t messageLength = message.size();
-//     const char* buffer = message.c_str();
-
-//     while (totalSent < messageLength) {
-//         int n = write(tcpSocket, buffer + totalSent, messageLength - totalSent);
-//         if (n == -1) {
-//             if (errno == EINTR) {
-//                 continue;
-//             }
-//             std::cerr << "Failed to send TCP message.\n";
-//             close(tcpSocket);
-//             exit(1);
-//         }
-//         totalSent += n;
-//     }
-// }
-
-// std::string GameClient::receiveTCPMessage() {
-//     char buffer[BUFFER_SIZE];
-//     std::string completeMessage;
-    
-//     while (true) {
-//         ssize_t n = read(tcpSocket, buffer, sizeof(buffer) - 1);
-//         if (n == -1) {
-//             if (errno == EINTR) {
-//                 continue;
-//             }
-//             std::cerr << "Failed to receive TCP message.\n";
-//             close(tcpSocket);
-//             exit(1);
-//         }
-//         if (n == 0) {
-//             break;
-//         }
-
-//         buffer[n] = '\0';
-//         completeMessage += std::string(buffer, n);
-
-//         if (!completeMessage.empty() && completeMessage.back() == '\n') {
-//             break;
-//         }
-//     }
-    
-//     return completeMessage;
-// }
-
 void GameClient::closeTCPSocket() {
     freeaddrinfo(tcpRes);
     close(tcpSocket);
@@ -175,21 +114,21 @@ int GameClient::handleResponse(const string response) {
     char status[32], subStatus[32];
     sscanf(response.c_str(), "%s %s", status, subStatus);
 
-    if (strcmp(status, "RSG") == 0) {
-        if (strcmp(subStatus, "OK") == 0) {
+    if (strcmp(status, RESPONSE_START) == 0) {
+        if (strcmp(subStatus, STATUS_OK) == 0) {
             char C1[8], C2[8], C3[8], C4[8];
             sscanf(response.c_str(), "%*s %*s %s %s %s %s", C1, C2, C3, C4);
             fprintf(stdout, "Game started successfully.\n");
             return SUCCESS;
-        } else if (strcmp(subStatus, "NOK") == 0) {
+        } else if (strcmp(subStatus, STATUS_NOK) == 0) {
             fprintf(stdout, "Failed to start game: Player has an ongoing game.\n");
             return FAIL;
-        } else if (strcmp(subStatus, "ERR") == 0) {
+        } else if (strcmp(subStatus, STATUS_ERR) == 0) {
             fprintf(stdout, "Failed to start game: Invalid arguments.\n");
             return FAIL;
         }
-    } else if (strcmp(status, "RTR") == 0) {
-        if (strcmp(subStatus, "OK") == 0) {
+    } else if (strcmp(status, RESPONSE_TRY) == 0) {
+        if (strcmp(subStatus, STATUS_OK) == 0) {
             int nT, nB, nW;
             char C1[8], C2[8], C3[8], C4[8];
             sscanf(response.c_str(), "%*s %*s %d %d %d %s %s %s %s", &nT, &nB, &nW, C1, C2, C3, C4);
@@ -198,85 +137,87 @@ int GameClient::handleResponse(const string response) {
                 fprintf(stdout, "Congratulations! You've guessed the secret key\n");
                 return SUCCESS;
             }
-        } else if (strcmp(subStatus, "DUP") == 0) {
+        } else if (strcmp(subStatus, DUPLICATE_TRY) == 0) {
             fprintf(stdout, "Duplicated trial.\n");
             return FAIL;
-        } else if (strcmp(subStatus, "INV") == 0) {
+        } else if (strcmp(subStatus, INVALID_TRY) == 0) {
             fprintf(stdout, "Invalid trial number or guess.\n");
             return FAIL;
-        } else if (strcmp(subStatus, "NOK") == 0) {
+        } else if (strcmp(subStatus, STATUS_NOK) == 0) {
             fprintf(stdout, "No ongoing game for this player.\n");
             return FAIL;
-        } else if (strcmp(subStatus, "ENT") == 0) {
+        } else if (strcmp(subStatus, NO_TRIAL) == 0) {
             char C1[8], C2[8], C3[8], C4[8];
             sscanf(response.c_str(), "%*s %*s %s %s %s %s", C1, C2, C3, C4);
             fprintf(stdout, "No more attempts available. The secret key was: %s %s %s %s\n", C1, C2, C3, C4);
             return FAIL;
-        } else if (strcmp(subStatus, "ETM") == 0) {
+        } else if (strcmp(subStatus, MAX_TIME) == 0) {
             char C1[8], C2[8], C3[8], C4[8];
             sscanf(response.c_str(), "%*s %*s %s %s %s %s", C1, C2, C3, C4);
             fprintf(stdout, "Maximum play time exceeded. The secret key was: %s %s %s %s\n", C1, C2, C3, C4);
             return FAIL;
-        } else if (strcmp(subStatus, "ERR") == 0) {
+        } else if (strcmp(subStatus, STATUS_ERR) == 0) {
             fprintf(stdout, "Error in trial request.\n");
             return FAIL;
         }
-    } else if (strcmp(status, "RQT") == 0) {
-        if (strcmp(subStatus, "OK") == 0) {
+    } else if (strcmp(status, RESPONSE_QUIT) == 0) {
+        if (strcmp(subStatus, STATUS_OK) == 0) {
             char C1[8], C2[8], C3[8], C4[8];
             sscanf(response.c_str(), "%*s %*s %s %s %s %s", C1, C2, C3, C4);
             fprintf(stdout, "Game terminated. The secret key was: %s %s %s %s\n", C1, C2, C3, C4);
             return SUCCESS;
-        } else if (strcmp(subStatus, "NOK") == 0) {
+        } else if (strcmp(subStatus, STATUS_NOK) == 0) {
             fprintf(stdout, "No ongoing game to terminate.\n");
             return FAIL;
-        } else if (strcmp(subStatus, "ERR") == 0) {
+        } else if (strcmp(subStatus, STATUS_ERR) == 0) {
             fprintf(stdout, "Error in quit request.\n");
             return FAIL;
         }
-    } else if (strcmp(status, "RDB") == 0) {
-        if (strcmp(subStatus, "OK") == 0) {
+    } else if (strcmp(status, RESPONSE_DEBUG) == 0) {
+        if (strcmp(subStatus, STATUS_OK) == 0) {
             fprintf(stdout, "Debug game started successfully.\n");
             return SUCCESS;
-        } else if (strcmp(subStatus, "NOK") == 0) {
+        } else if (strcmp(subStatus, STATUS_NOK) == 0) {
             fprintf(stdout, "Failed to start debug game: Player has an ongoing game.\n");
             return FAIL;
-        } else if (strcmp(subStatus, "ERR") == 0) {
+        } else if (strcmp(subStatus, STATUS_ERR) == 0) {
             fprintf(stdout, "Failed to start debug game: Invalid request.\n");
             return FAIL;
         }
-    } else if (strcmp(status, "RST") == 0) {
-        if (strcmp(subStatus, "ACT") == 0 || strcmp(subStatus, "FIN") == 0) {
+    } else if (strcmp(status, RESPONSE_SHOW_TRIALS) == 0) {
+        if (strcmp(subStatus, ACCEPT) == 0 || strcmp(subStatus, FINISH) == 0) {
             char Fname[128], FsizeStr[32];
             int Fsize;
             sscanf(response.c_str(), "%*s %*s %s %s", Fname, FsizeStr);
             Fsize = atoi(FsizeStr);
             std::string Fdata(response.substr(response.find(FsizeStr) + strlen(FsizeStr) + 1));
-            std::ofstream outFile(Fname);
+            std::string FnamePath = std::string("Client/Game_History/") + Fname; 
+            std::ofstream outFile(FnamePath);
             outFile << Fdata;
             outFile.close();
             fprintf(stdout, "Received file: %s (%d bytes)\n", Fname, Fsize);
-            fprintf(stdout, "%s", response.c_str());
+            fprintf(stdout, "%s", Fdata.c_str());
             return SUCCESS;
-        } else if (strcmp(subStatus, "NOK") == 0) {
+        } else if (strcmp(subStatus, STATUS_NOK) == 0) {
             fprintf(stdout, "No ongoing or finished game for this player.\n");
             return FAIL;
         } else {
             fprintf(stdout, "Unexpected response: %s", response.c_str());
             return FAIL;
         }
-    } else if (strcmp(status, "RSS") == 0) {
-        if (strcmp(subStatus, "OK") == 0) {
+    } else if (strcmp(status, RESPONSE_SCOREBOARD) == 0) {
+        if (strcmp(subStatus, STATUS_OK) == 0) {
             char Fname[128], FsizeStr[32];
             int Fsize;
             sscanf(response.c_str(), "%*s %*s %s %s", Fname, FsizeStr);
             Fsize = atoi(FsizeStr);
             std::string Fdata(response.substr(response.find(FsizeStr) + strlen(FsizeStr) + 1));
-            std::ofstream outFile(Fname);
+            std::string FnamePath = std::string("Client/Top_Scores/") + Fname;
+            std::ofstream outFile(FnamePath);
             outFile << Fdata;
             outFile.close();
             fprintf(stdout, "Received scoreboard file: %s (%d bytes)\n", Fname, Fsize);
-            fprintf(stdout, "%s", response.c_str());
+            fprintf(stdout, "%s", Fdata.c_str());
             return SUCCESS;
         } else if (strcmp(subStatus, "EMPTY") == 0) {
             fprintf(stdout, "Scoreboard is empty.\n");
@@ -302,7 +243,7 @@ void GameClient::handleStartGame(const string& command) {
 
     char sngCommand[128];
     snprintf(sngCommand, sizeof(sngCommand), "SNG %s %d\n", plid.c_str(), maxPlayTime);
-    sendUDPMessage(udpSocket, sngCommand, udpRes);
+    sendUDPMessage(udpSocket, sngCommand, (struct sockaddr_in*)udpRes->ai_addr, udpRes->ai_addrlen);
     std::string response = receiveUDPMessage(udpSocket, (struct sockaddr_in*)udpRes->ai_addr, &udpRes->ai_addrlen);
     if(handleResponse(response) == SUCCESS) {
         fprintf(stdout, "New game started (max %d sec)\n", maxPlayTime);
@@ -315,7 +256,7 @@ void GameClient::handleTry(const string& command) {
 
     char tryCommand[256];
     snprintf(tryCommand, sizeof(tryCommand), "TRY %s %s %d\n", plid.c_str(), colors, ++nT);
-    sendUDPMessage(udpSocket, tryCommand, udpRes);
+    sendUDPMessage(udpSocket, tryCommand, (struct sockaddr_in*)udpRes->ai_addr, udpRes->ai_addrlen);
     std::string response = receiveUDPMessage(udpSocket, (struct sockaddr_in*)udpRes->ai_addr, &udpRes->ai_addrlen);
     if(handleResponse(response) == FAIL)
         nT--;
@@ -333,19 +274,10 @@ void GameClient::handleShowTrials() {
 
     // Send command
     std::string strCommand = "STR " + plid + "\n";
-    if (sendTCPMessage(tcpSocket, strCommand) == FAIL) {
-        std::cerr << "Failed to send TCP message.\n";
-        closeTCPSocket();
-        return;
-    }
+    sendTCPMessage(tcpSocket, strCommand);
 
     // Receive response
     std::string response = receiveTCPMessage(tcpSocket);
-    if (response.empty()) {
-        std::cout << "Failed to receive response.\n";
-        closeTCPSocket();
-        return;
-    }
 
     handleResponse(response);
     closeTCPSocket();
@@ -357,19 +289,10 @@ void GameClient::handleScoreboard() {
 
     // Send command
     std::string ssbCommand = "SSB\n";
-    if (sendTCPMessage(tcpSocket, ssbCommand) == FAIL) {
-        std::cerr << "Failed to send TCP message.\n";
-        closeTCPSocket();
-        return;
-    }
+    sendTCPMessage(tcpSocket, ssbCommand);
 
     // Receive response
     std::string response = receiveTCPMessage(tcpSocket);
-    if (response.empty()) {
-        std::cout << "Failed to receive response.\n";
-        closeTCPSocket();
-        return;
-    }
 
     handleResponse(response);
     closeTCPSocket();
@@ -382,7 +305,7 @@ void GameClient::handleQuitExit() {
     } else {
         qutCommand = "QUT\n";
     }
-    sendUDPMessage(udpSocket, qutCommand, udpRes);
+    sendUDPMessage(udpSocket, qutCommand, (struct sockaddr_in*)udpRes->ai_addr, udpRes->ai_addrlen);
     std::string response = receiveUDPMessage(udpSocket, (struct sockaddr_in*)udpRes->ai_addr, &udpRes->ai_addrlen);
     handleResponse(response);
 }
@@ -397,7 +320,7 @@ void GameClient::handleDebug(const std::string& command) {
 
     char dbgCommand[256];
     snprintf(dbgCommand, sizeof(dbgCommand), "DBG %s %d %s %s %s %s\n", plid.c_str(), maxPlayTime, C1, C2, C3, C4);
-    sendUDPMessage(udpSocket, dbgCommand, udpRes);
+    sendUDPMessage(udpSocket, dbgCommand, (struct sockaddr_in*)udpRes->ai_addr, udpRes->ai_addrlen);
     std::string response = receiveUDPMessage(udpSocket, (struct sockaddr_in*)udpRes->ai_addr, &udpRes->ai_addrlen);
     if(handleResponse(response) == SUCCESS)
         fprintf(stdout, "Debug game started with duration %d seconds and secret key %s %s %s %s.\n", maxPlayTime, C1, C2, C3, C4);

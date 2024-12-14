@@ -1,0 +1,9 @@
+     Active game found for player 111222
+Game initiated: 2024-12-14 13:10:59 with 200 seconds to be completed
+
+     --- Transactions found: 2 ---
+
+Trial: RRRR, nB: 0, nW: 0 at  15s
+Trial: POOY, nB: 4, nW: 0 at  26s
+
+Termination: WIN at 2024-12-14 13:11:25, Duration: 26s

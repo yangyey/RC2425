@@ -2,49 +2,75 @@
 #include "constant.hpp"
 
 namespace protocols {
-    int sendTCPMessage(int sock, const std::string& message) {
+    void sendTCPMessage(int sock, const std::string& message) {
         size_t total = 0;
         size_t len = message.length();
+        ssize_t sent;
         
         while (total < len) {
-            ssize_t sent = write(sock, message.c_str() + total, len - total);
-            if (sent == -1) {
-                return FAIL;
+            sent = write(sock, message.c_str() + total, len - total);
+            
+            if (sent < 0) {
+                if (errno == EINTR) {
+                    continue;  
+                }
+                std::cerr << "Failed to send TCP message.\n";
+                return;
             }
+            
+            if (sent == 0) {
+                std::cerr << "Failed to send TCP message(Connection closed).\n";
+                return;
+            }
+            
             total += sent;
         }
-        return SUCCESS;
     }
 
     std::string receiveTCPMessage(int sock) {
         char buffer[BUFFER_SIZE];
         std::string message;
+        ssize_t received;
         
         while (true) {
-            ssize_t received = read(sock, buffer, sizeof(buffer) - 1);
-            if (received <= 0) {
-                std::cerr << "Failed to receive TCP message.\n";
-                close(sock);
-                exit(1);
+            received = read(sock, buffer, sizeof(buffer) - 1);
+            
+            if (received < 0) {
+                if (errno == EINTR) {
+                    continue;  
+                }
+                std::cerr << "Failed to send TCP message.\n";
             }
-            if (received == 0) break;
-
+            
+            if (received == 0) {
+                if (message.empty()) {
+                    std::cerr << "Failed to send TCP message(Connection closed).\n";
+                }
+                break;  
+            }
+            
             buffer[received] = '\0';
             message += std::string(buffer, received);
             
-            if (!message.empty() && message.back() == '\n') break;
+            // Check for message completion
+            size_t newline_pos = message.find('\n');
+            if (newline_pos != std::string::npos) {
+                break;
+            }
         }
+        
         return message;
     }
 
     // Implement UDP send/receive similarly...
-    void sendUDPMessage(int sock, const std::string& message, struct addrinfo* udpRes) {
-        ssize_t n = sendto(sock, message.c_str(), message.size(), 0, udpRes->ai_addr, udpRes->ai_addrlen);
+    void sendUDPMessage(int sock, const std::string& message, struct sockaddr_in* client_addr, socklen_t addrlen) {
+        ssize_t n = sendto(sock, message.c_str(), message.size(), 0, (struct sockaddr*)client_addr, addrlen);
         if (n == -1) {
             std::cerr << "Failed to send UDP message.\n";
             exit(1);
         }
     }
+
 
     std::string receiveUDPMessage(int sock, struct sockaddr_in* client_addr, socklen_t* addrlen) {
         char buffer[BUFFER_SIZE];
