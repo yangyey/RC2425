@@ -18,7 +18,7 @@ Game::Game(const std::string& pid, int maxPlayTime, char mode)
 void Game::saveInitialState() const {
     std::ofstream file(getGameFilePath());
     if (!file) {
-        throw std::runtime_error("Cannot create game file");
+        throw std::runtime_error("Cannot create game file"); 
     }
 
     // Get formatted time strings
@@ -298,15 +298,33 @@ std::string Server::handleRequest(const std::string& request, bool isTCP) {
     } else if (strcmp(command, REQUEST_SHOW_TRIALS) == 0 && isTCP) {
         return handleShowTrials(request);
     } else if (strcmp(command, REQUEST_SCOREBOARD) == 0 && isTCP) {
-        return handleScoreBoard(request);
+        return handleScoreBoard();
     }
     return "ERR\n";
+}
+
+bool Server::hasActiveTry(const std::string& plid) {
+    std::string gamePath = "Server/GAMES/GAME_" + plid + ".txt";
+    FILE* file = fopen(gamePath.c_str(), "r");
+    if (!file) {
+        return false;
+    }
+    
+    char line[256];
+    while (fgets(line, sizeof(line), file)) {
+        if (strncmp(line, "T:", 2) == 0) {
+            fclose(file);
+            return true;
+        }
+    }
+    fclose(file);
+    return false;
 }
 
 std::string Server::handleStartGame(const std::string& request) {
     char plid[7];
     int time;
-    
+
     if (sscanf(request.c_str(), "SNG %s %d", plid, &time) != 2) {
         std::cerr << "Failed to parse SNG command\n";
         return "RSG ERR\n";
@@ -317,11 +335,17 @@ std::string Server::handleStartGame(const std::string& request) {
         return "RSG ERR\n";
     }
 
+    // Check if game already exists and finalize it if it is time exceeded
     auto it = activeGames.find(plid);
-    // Check if player has an active game
-    if (it != activeGames.end() ) {
-        return "RSG NOK\n";
+    if (it != activeGames.end()) {
+        if (it->second.isTimeExceeded()) {
+            it->second.finalizeGame('T');
+            activeGames.erase(it);
+        } else if (hasActiveTry(plid)) {
+            return "RSG NOK\n";
+        }
     }
+
     // Create a new game
     try {
         // Erase the old game if it exists
@@ -499,17 +523,23 @@ std::string Server::handleQuitExit(const std::string& request) {
         return "RQT ERR\n";
     }
 
-    // Check if game exists
     auto it = activeGames.find(plid);
+
+    if (it->second.isTimeExceeded()) {
+        it->second.finalizeGame('T');
+        activeGames.erase(it);
+    }
+
+    // Check if game exists
     if (it == activeGames.end()) {
         return "RQT NOK\n";
     }
 
     try {
-        activeGames.erase(it); // Remove the game from active games
         Game& game = it->second;
         std::string secretKey = game.getSecretKey();
         game.finalizeGame('Q');
+        activeGames.erase(it); 
         return "RQT OK " + secretKey + "\n";
     } catch (const std::exception& e) {
         std::cerr << "Error finalizing game: " << e.what() << std::endl;
@@ -527,6 +557,8 @@ std::string Server::handleDebug(const std::string& request) {
         return "RDB ERR\n";
     }
 
+
+
     if (!isValidPlid(plid) || time <= 0 || time > 600) {
         std::cerr << "Invalid DBG command\n";
         return "RDB ERR\n";
@@ -538,14 +570,19 @@ std::string Server::handleDebug(const std::string& request) {
         return "RDB ERR\n";
     }
 
-    std::string key = formatColors(c1, c2, c3, c4);
-    
-    // Check for active game
+    // Check for active game and tries
     auto it = activeGames.find(plid);
     if (it != activeGames.end()) {
-        return "RDB NOK\n";
+        if (it->second.isTimeExceeded()) {
+            it->second.finalizeGame('T');
+            activeGames.erase(it);
+        } else if (hasActiveTry(plid)) {
+            return "RDB NOK\n";
+        }
     }
 
+    std::string key = formatColors(c1, c2, c3, c4);
+    
     try {
         // Erase the old game if it exists
         if (it != activeGames.end()) {
@@ -565,7 +602,7 @@ std::string Server::handleDebug(const std::string& request) {
 
 std::string Server::handleShowTrials(const std::string& request) {
     char plid[7];
-    
+
     if (sscanf(request.c_str(), "STR %s", plid) != 1) {
         std::cerr << "Failed to parse STR command\n";
         return "RST NOK\n";
@@ -575,8 +612,14 @@ std::string Server::handleShowTrials(const std::string& request) {
         return "RST NOK\n";
     }
 
-    // Check for active game first
     auto it = activeGames.find(plid);
+
+    if (it->second.isTimeExceeded()) {
+        it->second.finalizeGame('T');
+        activeGames.erase(it);
+    }
+
+    // Check for active game first
     if (it != activeGames.end() && it->second.isActive()) {
         return processActiveGame(plid, it->second);
     }
@@ -587,15 +630,22 @@ std::string Server::handleShowTrials(const std::string& request) {
 
 std::vector<std::string> Server::readGameFile(const std::string& filePath) {
     std::vector<std::string> lines;
-    std::ifstream file(filePath);
+    FILE* file = fopen(filePath.c_str(), "r");
     if (!file) {
         throw std::runtime_error("Cannot open game file");
     }
     
-    std::string line;
-    while (std::getline(file, line)) {
-        lines.push_back(line);
+    char line[256];
+    while (fgets(line, sizeof(line), file)) {
+        // Remove trailing newline if present
+        size_t len = strlen(line);
+        if (len > 0 && line[len-1] == '\n') {
+            line[len-1] = '\0';
+        }
+        lines.push_back(std::string(line));
     }
+    
+    fclose(file);
     
     if (lines.empty()) {
         throw std::runtime_error("Empty game file");
@@ -771,7 +821,7 @@ int Server::FindLastGame(const char* PLID, char* fname) {
     return found;
 }
 
-std::string Server::handleScoreBoard(const std::string&) {
+std::string Server::handleScoreBoard() {
     SCORELIST scores;
     int numScores = FindTopScores(&scores);
     

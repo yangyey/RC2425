@@ -105,9 +105,9 @@ private:
     std::string processFinishedGame(const std::string& plid);
     std::vector<std::string> readGameFile(const std::string& filePath);
     int FindLastGame(const char* PLID, char* fname);
-    std::string handleScoreBoard(const std::string& request);
+    std::string handleScoreBoard();
     int FindTopScores(SCORELIST* list);
-    // std::string handleScoreboard();
+    bool hasActiveTry(const std::string& plid);
 
 public:
     Server(int port);

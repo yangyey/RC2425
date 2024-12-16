@@ -239,7 +239,6 @@ void GameClient::handleStartGame(const string& command) {
     char pid[32];
     sscanf(command.c_str(), "%s %s %d", cmd, pid, &maxPlayTime);
     plid = pid;
-    nT = 0;
 
     char sngCommand[128];
     snprintf(sngCommand, sizeof(sngCommand), "SNG %s %d\n", plid.c_str(), maxPlayTime);
@@ -247,6 +246,7 @@ void GameClient::handleStartGame(const string& command) {
     std::string response = receiveUDPMessage(udpSocket, (struct sockaddr_in*)udpRes->ai_addr, &udpRes->ai_addrlen);
     if(handleResponse(response) == SUCCESS) {
         fprintf(stdout, "New game started (max %d sec)\n", maxPlayTime);
+        nT = 0;
     }
 }
 
@@ -316,14 +316,15 @@ void GameClient::handleDebug(const std::string& command) {
     char pid[32];
     sscanf(command.c_str(), "%s %s %d %s %s %s %s", cmd, pid, &maxPlayTime, C1, C2, C3, C4);
     plid = pid;
-    nT = 0;
 
     char dbgCommand[256];
     snprintf(dbgCommand, sizeof(dbgCommand), "DBG %s %d %s %s %s %s\n", plid.c_str(), maxPlayTime, C1, C2, C3, C4);
     sendUDPMessage(udpSocket, dbgCommand, (struct sockaddr_in*)udpRes->ai_addr, udpRes->ai_addrlen);
     std::string response = receiveUDPMessage(udpSocket, (struct sockaddr_in*)udpRes->ai_addr, &udpRes->ai_addrlen);
-    if(handleResponse(response) == SUCCESS)
-        fprintf(stdout, "Debug game started with duration %d seconds and secret key %s %s %s %s.\n", maxPlayTime, C1, C2, C3, C4);
+    if(handleResponse(response) == SUCCESS) {
+        fprintf(stdout, "New game started (max %d sec) and secret key %s %s %s %s\n", maxPlayTime, C1, C2, C3, C4);
+        nT = 0;
+    }
 }
 
 void GameClient::handleCommands() {
