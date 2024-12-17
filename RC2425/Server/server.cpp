@@ -151,7 +151,7 @@ void Game::saveScoreFile() const {
 }
 
 // Server implementation
-Server::Server(int port) : running(true) {
+Server::Server(int port, bool verboseMode) : running(true), verbose(verboseMode) {
     std::cout << "Server running on port " << port << std::endl;
     setupDirectory();
     setupSockets(port);
@@ -257,7 +257,7 @@ void Server::run() {
             struct sockaddr_in client_addr;
             socklen_t addrlen = sizeof(client_addr);
             std::string message = protocols::receiveUDPMessage(ufd, &client_addr, &addrlen);
-            std::string response = handleRequest(message, false);
+            std::string response = handleRequest(message, false, &client_addr);
             
             protocols::sendUDPMessage(ufd, response, &client_addr, addrlen);
         }
@@ -270,22 +270,45 @@ void Server::run() {
             
             if (client_fd >= 0) {
                 std::string message = protocols::receiveTCPMessage(client_fd);
-                std::string response = handleRequest(message, true);
+                std::string response = handleRequest(message, true, &client_addr);
                 
                 protocols::sendTCPMessage(client_fd, response);
 
-                // Send response back to client(AQUI TAMBEM!!!!!!!!)(mudar o write para sendTCPMessage)
-                // write(client_fd, response.c_str(), response.length());
                 close(client_fd);
             }
         }
     }
 }
 
+std::string Server::formatClientInfo(const struct sockaddr_in* client_addr) {
+    char ipstr[INET_ADDRSTRLEN];
+    inet_ntop(AF_INET, &(client_addr->sin_addr), ipstr, INET_ADDRSTRLEN);
+    return std::string(ipstr) + ":" + std::to_string(ntohs(client_addr->sin_port));
+}
 
-std::string Server::handleRequest(const std::string& request, bool isTCP) {
-    char command[10];
+std::string Server::handleRequest(const std::string& request, bool isTCP, 
+                                    const struct sockaddr_in* client_addr) {
+    char command[10], plid[7];
     sscanf(request.c_str(), "%s", command);
+
+    if (verbose) {
+        // Extract PLID if present in command
+        bool hasPlid = false;
+        if (sscanf(request.c_str(), "%*s %s", plid) == 1) {
+            hasPlid = true;
+        }
+
+        std::cout << "Request received: " << command;
+        if (hasPlid) {
+            std::cout << " from PLID: " << plid;
+        }
+        std::cout << " via " << (isTCP ? "TCP" : "UDP");
+        
+        if (client_addr != nullptr) {
+            std::cout << " from " << formatClientInfo(client_addr);
+        }
+        std::cout << std::endl;
+    }
 
     if (strcmp(command, REQUEST_START) == 0) {
         return handleStartGame(request);
@@ -390,11 +413,6 @@ std::string Server::handleTry(const std::string& request) {
     if (it == activeGames.end()) {
         return "RTR NOK\n";
     }
-
-    // Activate game if it's the first trial
-    // if (trialNum == 1) {
-        // it->second.setActive(true);
-    // }
 
     std::string secretKey;
     secretKey = it->second.getSecretKey();
@@ -910,13 +928,33 @@ int Server::FindTopScores(SCORELIST* list) {
 
 int main(int argc, char* argv[]) {
     int port = DSPORT_DEFAULT;
-    if (argc > 1) {
-        port = stoi(argv[1]);
+    bool verbose = false;
+    
+    // Parse command line arguments
+    for (int i = 1; i < argc; i++) {
+        if (strcmp(argv[i], "-p") == 0 && i + 1 < argc) {
+            port = atoi(argv[i + 1]);
+            i++; // Skip next argument
+        }
+        else if (strcmp(argv[i], "-v") == 0) {
+            verbose = true;
+        }
+        else {
+            std::cerr << "Usage: " << argv[0] << " [-p GSport] [-v]" << std::endl;
+            return 1;
+        }
+    }
+
+    // Validate port number
+    if (port <= 0 || port > 65535) {
+        std::cerr << "Invalid port number. Using default port " << DSPORT_DEFAULT << std::endl;
+        port = DSPORT_DEFAULT;
     }
 
     try {
-        Server server(port);
-    } catch (const std::exception& e) {
+        Server server(port, verbose);
+    }
+    catch (const std::exception& e) {
         std::cerr << "Error: " << e.what() << std::endl;
         return 1;
     }

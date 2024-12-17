@@ -62,7 +62,6 @@ namespace protocols {
         return message;
     }
 
-    // Implement UDP send/receive similarly...
     void sendUDPMessage(int sock, const std::string& message, struct sockaddr_in* client_addr, socklen_t addrlen) {
         ssize_t n = sendto(sock, message.c_str(), message.size(), 0, (struct sockaddr*)client_addr, addrlen);
         if (n == -1) {

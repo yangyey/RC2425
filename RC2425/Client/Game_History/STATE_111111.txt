@@ -1,0 +1,7 @@
+     Active game found for player 111111
+Game initiated: 2024-12-14 23:33:33 with 111 seconds to be completed
+
+     --- Transactions found: 0 ---
+
+
+  -- 7 seconds remaining to be completed -- 

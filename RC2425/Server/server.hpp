@@ -79,10 +79,12 @@ private:
     const std::unordered_set<std::string> VALID_COLORS = {"B", "G", "Y", "R", "P", "O"};
     std::map<std::string, Game> activeGames;
     // std::vector<std::pair<std::string, int>> scoreboard;
+    bool verbose;  // Add this member variable
 
     void setupDirectory();
     void setupSockets(int port);
-    std::string handleRequest(const std::string& request, bool isTCP);
+    std::string handleRequest(const std::string& request, bool isTCP, 
+                                const struct sockaddr_in* client_addr);
     std::string handleStartGame(const std::string& request);
     std::string handleTry(const std::string& request);
     void countMatches(const std::string& c1, const std::string& c2,
@@ -108,9 +110,10 @@ private:
     std::string handleScoreBoard();
     int FindTopScores(SCORELIST* list);
     bool hasActiveTry(const std::string& plid);
+    std::string formatClientInfo(const struct sockaddr_in* client_addr);
 
 public:
-    Server(int port);
+    Server(int port, bool verboseMode = false);  // Modify constructor
     ~Server() = default;
     void run();
 };
