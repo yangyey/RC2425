@@ -553,7 +553,7 @@ std::string Server::handleQuitExit(const std::string& request) {
     if (it->second.isTimeExceeded()) {
         it->second.finalizeGame('T');
         activeGames.erase(it);
-        return "RQT NOK";
+        return "RQT NOK\n";
     }
 
 
