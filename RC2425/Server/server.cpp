@@ -865,8 +865,8 @@ std::string Server::handleScoreBoard() {
     std::stringstream content;
     
     // Rest of the content formatting remains the same
-    content << "-------------------------------- TOP 10 SCORES --------------------------------\n\n"
-           << "                 SCORE PLAYER     CODE    NO TRIALS   MODE\n\n";
+    content << "-------------------------------- TOP 10 SCORES --------------------------------\n"
+           << "                 SCORE PLAYER     CODE    NO TRIALS   MODE\n";
 
     for (int i = 0; i < numScores; i++) {
         content << "            " 
@@ -884,7 +884,7 @@ std::string Server::handleScoreBoard() {
     std::string fileContent = content.str();
     return "RSS OK " + fileName + " " + 
            std::to_string(fileContent.length()) + " " + 
-           fileContent + "\n";
+           fileContent;
 }
 
 int Server::FindTopScores(SCORELIST* list) {
