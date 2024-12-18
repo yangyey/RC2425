@@ -879,12 +879,12 @@ std::string Server::handleScoreBoard() {
                 << "\n";
     }
     
-
+    content << "\n";
     
     std::string fileContent = content.str();
     return "RSS OK " + fileName + " " + 
            std::to_string(fileContent.length()) + " " + 
-           fileContent;
+           fileContent + "\n";
 }
 
 int Server::FindTopScores(SCORELIST* list) {
