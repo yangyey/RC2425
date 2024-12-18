@@ -857,7 +857,7 @@ std::string Server::handleScoreBoard() {
     time_t now = time(nullptr);
     struct tm* timeinfo = localtime(&now);
     char timestamp[20];
-    strftime(timestamp, sizeof(timestamp), "%d%m%y_%H:%M:%S", timeinfo);
+    strftime(timestamp, sizeof(timestamp), "%d%m%y_%H_%M_%S", timeinfo);
     
     // Create filename
     std::string fileName = "TOP_10_SCORES_" + std::string(timestamp) + ".txt";
@@ -865,8 +865,8 @@ std::string Server::handleScoreBoard() {
     std::stringstream content;
     
     // Rest of the content formatting remains the same
-    content << "-------------------------------- TOP 10 SCORES --------------------------------\n"
-           << "                 SCORE PLAYER     CODE    NO TRIALS   MODE\n";
+    content << "-------------------------------- TOP 10 SCORES --------------------------------\n\n"
+           << "                 SCORE PLAYER     CODE    NO TRIALS   MODE\n\n";
 
     for (int i = 0; i < numScores; i++) {
         content << "            " 
