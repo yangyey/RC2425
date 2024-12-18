@@ -36,14 +36,9 @@ private:
     void parseArguments(int argc, char** argv);
     void setupUDPSocket();
     void closeUDPSocket();
-    void handleCommands();
     
     // Communication
-    // void sendUDPMessage(const std::string& message);
-    // std::string receiveUDPMessage();
     void setupTCPSocket();
-    // void sendTCPMessage(const std::string& message);
-    // std::string receiveTCPMessage();
     void closeTCPSocket();
     int handleResponse(const std::string response);
 
@@ -54,6 +49,8 @@ private:
     void handleScoreboard();
     void handleQuitExit();
     void handleDebug(const std::string& command);
+    bool checkInputFormat(const std::string& command, int n);
+    void handleCommands();
 };
 
 #endif

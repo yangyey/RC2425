@@ -1,8 +1,7 @@
      Active game found for player 112233
-Game initiated: 2024-12-14 13:07:26 with 200 seconds to be completed
+Game initiated: 2024-12-17 23:42:01 with 10 seconds to be completed
 
-     --- Transactions found: 1 ---
+     --- Transactions found: 0 ---
 
-Trial: GRPB, nB: 4, nW: 0 at  13s
 
-Termination: WIN at 2024-12-14 13:07:39, Duration: 13s
+Termination: TIMEOUT at 2024-12-17 23:42:24, Duration: 23s

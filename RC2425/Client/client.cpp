@@ -238,7 +238,6 @@ void GameClient::handleStartGame(const string& command) {
     int maxPlayTime;
     char pid[32];
     sscanf(command.c_str(), "%s %s %d", cmd, pid, &maxPlayTime);
-    
 
     char sngCommand[128];
     snprintf(sngCommand, sizeof(sngCommand), "SNG %s %d\n", pid, maxPlayTime);
@@ -329,6 +328,20 @@ void GameClient::handleDebug(const std::string& command) {
     }
 }
 
+bool GameClient::checkInputFormat(const std::string& command, int n) {
+    const char* ptr = command.c_str();
+    int spaces = 0;
+    while (*ptr) {
+        if (*ptr == ' ') spaces++;
+        ptr++;
+    }
+    if (spaces != n - 1) {
+        fprintf(stderr, "Error: too many parameters\n");
+        return false;
+    }
+    return true;
+}
+
 void GameClient::handleCommands() {
     char command[256];
 
@@ -341,14 +354,19 @@ void GameClient::handleCommands() {
         command[strcspn(command, "\n")] = 0;
 
         if (strncmp(command, "start", 5) == 0) {
+            if (checkInputFormat(command, 3) == false) continue;
             handleStartGame(command);
         } else if (strncmp(command, "try", 3) == 0) {
+            if (checkInputFormat(command, 5) == false) continue;
             handleTry(command);
         } else if (strcmp(command, "show_trials") == 0 || strcmp(command, "st") == 0) {
+            if (checkInputFormat(command, 1) == false) continue;
             handleShowTrials();
         } else if (strcmp(command, "scoreboard") == 0 || strcmp(command, "sb") == 0) {
+            if (checkInputFormat(command, 1) == false) continue;
             handleScoreboard();
         } else if (strcmp(command, "exit") == 0 || strcmp(command, "quit") == 0) {
+            if (checkInputFormat(command, 1) == false) continue;
             handleQuitExit();
             if (strcmp(command, "quit") == 0) {
                 continue;
@@ -356,6 +374,7 @@ void GameClient::handleCommands() {
                 break;
             }
         } else if (strncmp(command, "debug", 5) == 0) {
+            if (checkInputFormat(command, 7) == false) continue;
             handleDebug(command);
         } else {
             fprintf(stdout, "Unknown command.\n");

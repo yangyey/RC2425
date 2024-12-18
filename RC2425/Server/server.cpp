@@ -151,7 +151,7 @@ void Game::saveScoreFile() const {
 }
 
 // Server implementation
-Server::Server(int port, bool verboseMode) : running(true), verbose(verboseMode) {
+Server::Server(int port, bool verboseMode) : verbose(verboseMode) {
     std::cout << "Server running on port " << port << std::endl;
     setupDirectory();
     setupSockets(port);
@@ -236,7 +236,7 @@ void Server::setupSockets(int port) {
 }
 
 void Server::run() {
-    while (running) {
+    while (true) {
         testfds = inputs;
         timeout.tv_sec = 10;
         timeout.tv_usec = 0;
@@ -248,10 +248,10 @@ void Server::run() {
             throw runtime_error("select error");
         }
         
-        if (ready == 0) {
-            cout << "Timeout - no activity\n";
-            continue;
-        }
+        // if (ready == 0) {
+        //     cout << "Timeout - no activity\n";
+        //     continue;
+        // }
 
         if (FD_ISSET(ufd, &testfds)) {
             struct sockaddr_in client_addr;
@@ -347,6 +347,7 @@ bool Server::hasActiveTry(const std::string& plid) {
 std::string Server::handleStartGame(const std::string& request) {
     char plid[7];
     int time;
+    bool erased = false;
 
     if (sscanf(request.c_str(), "SNG %s %d", plid, &time) != 2) {
         std::cerr << "Failed to parse SNG command\n";
@@ -364,6 +365,7 @@ std::string Server::handleStartGame(const std::string& request) {
         if (it->second.isTimeExceeded()) {
             it->second.finalizeGame('T');
             activeGames.erase(it);
+            erased = true;
         } else if (hasActiveTry(plid)) {
             return "RSG NOK\n";
         }
@@ -372,7 +374,7 @@ std::string Server::handleStartGame(const std::string& request) {
     // Create a new game
     try {
         // Erase the old game if it exists
-        if (it != activeGames.end()) {
+        if (it != activeGames.end() && erased == false) {
             activeGames.erase(it);
         }
         Game newGame(plid, time, 'P'); // 'P' for Play mode
@@ -543,15 +545,17 @@ std::string Server::handleQuitExit(const std::string& request) {
 
     auto it = activeGames.find(plid);
 
-    if (it->second.isTimeExceeded()) {
-        it->second.finalizeGame('T');
-        activeGames.erase(it);
-    }
-
     // Check if game exists
     if (it == activeGames.end()) {
         return "RQT NOK\n";
     }
+
+    if (it->second.isTimeExceeded()) {
+        it->second.finalizeGame('T');
+        activeGames.erase(it);
+        return "RQT NOK";
+    }
+
 
     try {
         Game& game = it->second;
@@ -568,6 +572,7 @@ std::string Server::handleQuitExit(const std::string& request) {
 std::string Server::handleDebug(const std::string& request) {
     char plid[7], c1[2], c2[2], c3[2], c4[2];
     int time;
+    bool erased = false;
     
     if (sscanf(request.c_str(), "DBG %s %d %s %s %s %s", 
                plid, &time, c1, c2, c3, c4) != 6) {
@@ -594,6 +599,7 @@ std::string Server::handleDebug(const std::string& request) {
         if (it->second.isTimeExceeded()) {
             it->second.finalizeGame('T');
             activeGames.erase(it);
+            erased = true;
         } else if (hasActiveTry(plid)) {
             return "RDB NOK\n";
         }
@@ -603,7 +609,7 @@ std::string Server::handleDebug(const std::string& request) {
     
     try {
         // Erase the old game if it exists
-        if (it != activeGames.end()) {
+        if (it != activeGames.end() && erased == false) {
             activeGames.erase(it);
         }
         Game newGame(plid, time, 'D'); // 'D' for Debug mode

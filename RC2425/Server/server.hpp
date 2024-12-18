@@ -75,7 +75,6 @@ private:
     int max_fd;
     struct addrinfo hints, *res;
     int ufd, tfd;
-    bool running;
     const std::unordered_set<std::string> VALID_COLORS = {"B", "G", "Y", "R", "P", "O"};
     std::map<std::string, Game> activeGames;
     // std::vector<std::pair<std::string, int>> scoreboard;
