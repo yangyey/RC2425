@@ -216,7 +216,7 @@ int GameClient::handleResponse(const string response) {
             std::ofstream outFile(FnamePath);
             outFile << Fdata;
             outFile.close();
-            fprintf(stdout, "Received scoreboard file: %s (%d bytes)\n", Fname, Fsize);
+            fprintf(stdout, "Received scoreboard file: %s (%d bytes)\n\n", Fname, Fsize);
             fprintf(stdout, "%s", Fdata.c_str());
             return SUCCESS;
         } else if (strcmp(subStatus, "EMPTY") == 0) {

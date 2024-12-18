@@ -853,14 +853,16 @@ std::string Server::handleScoreBoard() {
         return "RSS EMPTY\n";
     }
 
+    /*
     // Get current time for filename
     time_t now = time(nullptr);
     struct tm* timeinfo = localtime(&now);
     char timestamp[20];
     strftime(timestamp, sizeof(timestamp), "%d%m%y_%H_%M_%S", timeinfo);
-    
+    */
+
     // Create filename
-    std::string fileName = "TOP_10_SCORES_" + std::string(timestamp) + ".txt";
+    std::string fileName = "TOP_10_SCORES_" + to_string(sb_count++) + ".txt";
 
     std::stringstream content;
     
@@ -884,7 +886,7 @@ std::string Server::handleScoreBoard() {
     std::string fileContent = content.str();
     return "RSS OK " + fileName + " " + 
            std::to_string(fileContent.length()) + " " + 
-           fileContent;
+           fileContent + "\n";
 }
 
 int Server::FindTopScores(SCORELIST* list) {

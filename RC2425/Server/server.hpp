@@ -69,6 +69,7 @@ private:
         char mode[10][6]; 
     } SCORELIST;
 
+    int sb_count = 1;
     const int MAX_ATTEMPTS = 8;
     fd_set inputs, testfds;
     struct timeval timeout;
