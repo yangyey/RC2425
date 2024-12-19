@@ -11,15 +11,19 @@ namespace protocols {
             sent = write(sock, message.c_str() + total, len - total);
             
             if (sent < 0) {
-                if (errno == EINTR) {
+                if (errno == EINTR) { //Interrupted, try again
                     continue;  
+                }
+                if (errno == EPIPE || errno == ECONNRESET) {  // Connection broken
+                    std::cerr << "Connection broken while sending\n";
+                    return;
                 }
                 std::cerr << "Failed to send TCP message.\n";
                 return;
             }
             
             if (sent == 0) {
-                std::cerr << "Failed to send TCP message(Connection closed).\n";
+                std::cerr << "Connection closed by peer while sending\n";
                 return;
             }
             
@@ -39,14 +43,15 @@ namespace protocols {
                 if (errno == EINTR) {
                     continue;  
                 }
-                std::cerr << "Failed to send TCP message.\n";
+                if (errno == ECONNRESET) {  // Connection reset by peer
+                    return "Connection reset by peer\n";
+                }
+                return "Failed to send TCP message.\n";
             }
             
             if (received == 0) {
-                if (message.empty()) {
-                    std::cerr << "Failed to send TCP message(Connection closed).\n";
-                }
-                break;  
+                std::cerr << "Connection closed by peer\n";
+                return message; 
             }
             
             buffer[received] = '\0';
@@ -66,8 +71,12 @@ namespace protocols {
         ssize_t n = sendto(sock, message.c_str(), message.size(), 0, (struct sockaddr*)client_addr, addrlen);
         if (n == -1) {
             std::cerr << "Failed to send UDP message.\n";
-            exit(1);
+            return;
         }
+
+        if (n < static_cast<ssize_t>(message.size())) {
+        std::cerr << "Warning: Only sent " << n << " of " << message.size() << " bytes\n";
+    }
     }
 
 
@@ -78,17 +87,17 @@ namespace protocols {
 
         if (n == -1) {
             if (errno == EAGAIN || errno == EWOULDBLOCK) {
-                std::cerr << "Timeout, please retry\n";
+                std::cerr << "Request timed out. Please try again\n";
             } else {
                 std::cerr << "Error receiving message: " << strerror(errno) << "\n";
             }
-            return "";
+            return "Failed to receive UDP message.\n";
         }
 
         if (n >= 0 && n < BUFFER_SIZE) {
             buffer[n] = '\0';
             return std::string(buffer);
         }
-        return "";
+        return "Failed to receive UDP message.\n";
     }
 }

@@ -188,11 +188,26 @@ int GameClient::handleResponse(const string response) {
         if (strcmp(subStatus, ACCEPT) == 0 || strcmp(subStatus, FINISH) == 0) {
             char Fname[128], FsizeStr[32];
             int Fsize;
-            sscanf(response.c_str(), "%*s %*s %s %s", Fname, FsizeStr);
+            if (sscanf(response.c_str(), "%*s %*s %s %s", Fname, FsizeStr) != 2) {
+                std::cerr << "Error: Malformed response - couldn't parse filename and size\n";
+                return FAIL;
+            }
             Fsize = atoi(FsizeStr);
+            if (Fsize <= 0) {
+                std::cerr << "Error: Invalid file size\n";
+                return FAIL;
+            }
             std::string Fdata(response.substr(response.find(FsizeStr) + strlen(FsizeStr) + 1));
+            if (Fdata.empty()) {
+                std::cerr << "Error: No file data found\n";
+                return FAIL;
+            }
             std::string FnamePath = std::string("Client/Game_History/") + Fname; 
             std::ofstream outFile(FnamePath);
+            if (!outFile) {
+                std::cerr << "Error: Cannot create output file\n";
+                return FAIL;
+            }
             outFile << Fdata;
             outFile.close();
             fprintf(stdout, "Received file: %s (%d bytes)\n", Fname, Fsize);
@@ -209,11 +224,26 @@ int GameClient::handleResponse(const string response) {
         if (strcmp(subStatus, STATUS_OK) == 0) {
             char Fname[128], FsizeStr[32];
             int Fsize;
-            sscanf(response.c_str(), "%*s %*s %s %s", Fname, FsizeStr);
+            if (sscanf(response.c_str(), "%*s %*s %s %s", Fname, FsizeStr) != 2) {
+                std::cerr << "Error: Malformed response - couldn't parse filename and size\n";
+                return FAIL;
+            }
             Fsize = atoi(FsizeStr);
+            if (Fsize <= 0) {
+                std::cerr << "Error: Invalid file size\n";
+                return FAIL;
+            }
             std::string Fdata(response.substr(response.find(FsizeStr) + strlen(FsizeStr) + 1));
+            if (Fdata.empty()) {
+                std::cerr << "Error: No file data found\n";
+                return FAIL;
+            }
             std::string FnamePath = std::string("Client/Top_Scores/") + Fname;
             std::ofstream outFile(FnamePath);
+            if (!outFile) {
+                std::cerr << "Error: Cannot create output file\n";
+                return FAIL;
+            }
             outFile << Fdata;
             outFile.close();
             fprintf(stdout, "Received scoreboard file: %s (%d bytes)\n\n", Fname, Fsize);
@@ -329,8 +359,8 @@ bool GameClient::checkInputFormat(const std::string& command, int n) {
         if (*ptr == ' ') spaces++;
         ptr++;
     }
-    if (spaces > n - 1) {
-        fprintf(stderr, "Error: too many parameters\n");
+    if (spaces != n - 1) {
+        fprintf(stderr, "Error: parameters number does not correspond\n");
         return false;
     }
     return true;

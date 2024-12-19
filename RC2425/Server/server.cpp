@@ -18,7 +18,8 @@ Game::Game(const std::string& pid, int maxPlayTime, char mode)
 void Game::saveInitialState() const {
     std::ofstream file(getGameFilePath());
     if (!file) {
-        throw std::runtime_error("Cannot create game file"); 
+        std::cerr << "Error creating game file\n";
+        return;
     }
 
     // Get formatted time strings
@@ -39,7 +40,8 @@ void Game::saveInitialState() const {
 void Game::appendTrialToFile(const std::string& trial, int nB, int nW) const {
     std::ofstream file(getGameFilePath(), std::ios::app);
     if (!file) {
-        throw std::runtime_error("Cannot append to game file");
+        std::cerr << "Cannot append to game file\n";
+        return;
     }
 
     // Calculate seconds from start
@@ -139,7 +141,8 @@ void Game::saveScoreFile() const {
                                
     std::ofstream scoreFile(scoreFileName);
     if (!scoreFile) {
-        throw std::runtime_error("Cannot create score file");
+        std::cerr << "Cannot create score file\n";
+        return;
     }
     
     // Format: "SSS PPPPPP CCCC N mode"
@@ -182,7 +185,8 @@ void Server::setupSockets(int port) {
     // Setup TCP socket
     tfd = socket(AF_INET, SOCK_STREAM, 0);
     if (tfd == -1) {
-        throw runtime_error("Failed to create TCP socket");
+        std::cerr << "Failed to create TCP socket\n";
+        return;
     }
     memset(&hints, 0, sizeof(hints));
     hints.ai_family = AF_INET;
@@ -191,21 +195,28 @@ void Server::setupSockets(int port) {
 
     int errcode = getaddrinfo(NULL, to_string(port).c_str(), &hints, &res);
     if (errcode != 0) {
-        throw runtime_error(string("getaddrinfo: ") + gai_strerror(errcode));
+        std::cerr << "getaddrinfo: " << gai_strerror(errcode) << std::endl;
+        return;
     }
 
     // reuse the address 
     int yes = 1;
     if (setsockopt(tfd, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(yes)) == -1) {
-        throw runtime_error("setsockopt failed");
+        std::cerr << "setsockopt failed\n";
+        return;
     }
 
     if (bind(tfd, res->ai_addr, res->ai_addrlen) == -1) {
-        throw runtime_error("TCP bind failed");
+        if (errno == EADDRINUSE) {
+            std::cerr << "Port " << port << " already in use\n";
+        }
+        std::cerr << "TCP bind failed\n";
+        return;
     }
 
     if (listen(tfd, SOMAXCONN) == -1) {
-        throw runtime_error("TCP listen failed");
+        std::cerr << "TCP listen failed\n";
+        return;
     }
 
     freeaddrinfo(res);
@@ -213,7 +224,8 @@ void Server::setupSockets(int port) {
     // Setup UDP socket
     ufd = socket(AF_INET, SOCK_DGRAM, 0);
     if (ufd == -1) {
-        throw runtime_error("Failed to create UDP socket");
+        std::cerr << "Failed to create UDP socket\n";
+        return;
     }
     memset(&hints, 0, sizeof(hints));
     hints.ai_family = AF_INET;
@@ -221,12 +233,17 @@ void Server::setupSockets(int port) {
     hints.ai_flags = AI_PASSIVE | AI_NUMERICSERV;
 
     if ((errcode = getaddrinfo(NULL, to_string(port).c_str(), &hints, &res)) != 0) {
-        throw runtime_error(string("getaddrinfo: ") + gai_strerror(errcode));
+        std::cerr << "getaddrinfo: " << gai_strerror(errcode) << std::endl;
+        return;
     }
 
 
     if (bind(ufd, res->ai_addr, res->ai_addrlen) == -1) {
-        throw runtime_error("UDP bind failed");
+        if (errno == EADDRINUSE) {
+            std::cerr << "Port " << port << " already in use\n";
+        }
+        std::cerr << "UDP bind failed\n";
+        return;
     }
 
     freeaddrinfo(res);
@@ -248,13 +265,9 @@ void Server::run() {
         
         if (ready < 0) {
             if (errno == EINTR) continue;
-            throw runtime_error("select error");
+            std::cerr << "Select error\n";
+            return;
         }
-        
-        // if (ready == 0) {
-        //     cout << "Timeout - no activity\n";
-        //     continue;
-        // }
 
         if (FD_ISSET(ufd, &testfds)) {
             struct sockaddr_in client_addr;
@@ -292,41 +305,57 @@ std::string Server::formatClientInfo(const struct sockaddr_in* client_addr) {
 std::string Server::handleRequest(const std::string& request, bool isTCP, 
                                     const struct sockaddr_in* client_addr) {
     char command[10], plid[7];
+    std::string response;
     sscanf(request.c_str(), "%s", command);
 
     if (verbose) {
-        // Extract PLID if present in command
+        // Log incoming request
         bool hasPlid = false;
         if (sscanf(request.c_str(), "%*s %s", plid) == 1) {
             hasPlid = true;
         }
 
-        std::cout << "Request received: " << command;
-        if (hasPlid) {
-            std::cout << " from PLID: " << plid;
-        }
-        std::cout << " via " << (isTCP ? "TCP" : "UDP");
-        
+        std::cout << "Request from client: " << command;
         if (client_addr != nullptr) {
-            std::cout << " from " << formatClientInfo(client_addr);
+            std::cout << formatClientInfo(client_addr) << "\n";
         }
+        std::cout << "\n    Protocol: " << (isTCP ? "TCP" : "UDP") << "\n";
+        std::cout << "    Command: " << command;
+        if (hasPlid) {
+            std::cout << "\n    PLID: " << plid;
+        }
+        std::cout << "\n    Full request: " << request;
+
         std::cout << std::endl;
     }
 
     if (strcmp(command, REQUEST_START) == 0) {
-        return handleStartGame(request);
+        response = handleStartGame(request);
     } else if (strcmp(command, REQUEST_TRY) == 0) {
-        return handleTry(request);
+        response = handleTry(request);
     } else if (strcmp(command, REQUEST_QUIT) == 0) {
-        return handleQuitExit(request);
+        response = handleQuitExit(request);
     } else if (strcmp(command, REQUEST_DEBUG) == 0) {
-        return handleDebug(request);
+        response = handleDebug(request);
     } else if (strcmp(command, REQUEST_SHOW_TRIALS) == 0 && isTCP) {
-        return handleShowTrials(request);
+        response = handleShowTrials(request);
     } else if (strcmp(command, REQUEST_SCOREBOARD) == 0 && isTCP) {
-        return handleScoreBoard();
+        response = handleScoreBoard();
+    } else {
+        response = "ERR\n";
     }
-    return "ERR\n";
+
+    if (verbose) {
+        // Log outgoing response
+        std::cout << "\nResponse to client:";
+        if (client_addr != nullptr) {
+            std::cout << " " << formatClientInfo(client_addr);
+        }
+        std::cout << "\n    Protocol: " << (isTCP ? "TCP" : "UDP") << "\n";
+        std::cout << "    Response: " << response;
+        std::cout << std::endl;
+    }
+    return response;
 }
 
 Server::GameFileStatus Server::checkGameFile(const std::string& plid) const {
@@ -701,7 +730,8 @@ std::vector<std::string> Server::readGameFile(const std::string& filePath) {
     std::vector<std::string> lines;
     FILE* file = fopen(filePath.c_str(), "r");
     if (!file) {
-        throw std::runtime_error("Cannot open game file");
+        std::cerr << "Cannot open game file\n";
+        return lines;
     }
     
     char line[256];
@@ -717,7 +747,8 @@ std::vector<std::string> Server::readGameFile(const std::string& filePath) {
     fclose(file);
     
     if (lines.empty()) {
-        throw std::runtime_error("Empty game file");
+        std::cerr << "Empty game file\n";
+        return lines;
     }
     
     return lines;
