@@ -269,14 +269,11 @@ void GameClient::handleShowTrials() {
         return;
     }
 
-    // Setup TCP connection
     setupTCPSocket();
 
-    // Send command
     std::string strCommand = "STR " + plid + "\n";
     sendTCPMessage(tcpSocket, strCommand);
 
-    // Receive response
     std::string response = receiveTCPMessage(tcpSocket);
 
     handleResponse(response);
@@ -284,14 +281,11 @@ void GameClient::handleShowTrials() {
 }
 
 void GameClient::handleScoreboard() {
-    // Setup TCP connection
     setupTCPSocket();
 
-    // Send command
     std::string ssbCommand = "SSB\n";
     sendTCPMessage(tcpSocket, ssbCommand);
 
-    // Receive response
     std::string response = receiveTCPMessage(tcpSocket);
 
     handleResponse(response);
@@ -335,7 +329,7 @@ bool GameClient::checkInputFormat(const std::string& command, int n) {
         if (*ptr == ' ') spaces++;
         ptr++;
     }
-    if (spaces != n - 1) {
+    if (spaces > n - 1) {
         fprintf(stderr, "Error: too many parameters\n");
         return false;
     }

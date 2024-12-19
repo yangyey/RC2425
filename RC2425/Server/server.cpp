@@ -77,7 +77,11 @@ void Game::finalizeGame(char endCode) {
         struct tm* timeinfo = gmtime(&now);
         char timeStr[30];
         strftime(timeStr, sizeof(timeStr), "%Y-%m-%d %H:%M:%S", timeinfo);
-        file << timeStr << " " << (now - startTime) << std::endl;
+        if (endCode != 'T') {
+            file << timeStr << " " << (now - startTime) << std::endl;
+        } else {
+            file << timeStr << " " << maxTime << " " << endCode << std::endl;
+        }
         file.close();
     }
 
@@ -85,8 +89,7 @@ void Game::finalizeGame(char endCode) {
     char newFileName[100];
     time_t now = time(nullptr);
     struct tm* timeinfo = gmtime(&now);
-    strftime(newFileName, sizeof(newFileName), 
-            "%Y%m%d_%H%M%S", timeinfo);
+    strftime(newFileName, sizeof(newFileName), "%Y%m%d_%H%M%S", timeinfo);
     
     std::string newPath = playerDir + "/" + newFileName + "_" + endCode + ".txt";
     rename(getGameFilePath().c_str(), newPath.c_str());
@@ -326,22 +329,44 @@ std::string Server::handleRequest(const std::string& request, bool isTCP,
     return "ERR\n";
 }
 
-bool Server::hasActiveTry(const std::string& plid) {
+Server::GameFileStatus Server::checkGameFile(const std::string& plid) const {
     std::string gamePath = "Server/GAMES/GAME_" + plid + ".txt";
     FILE* file = fopen(gamePath.c_str(), "r");
-    if (!file) {
-        return false;
-    }
     
+    if (!file) {
+        return NO_GAME;
+    }
+
     char line[256];
-    while (fgets(line, sizeof(line), file)) {
-        if (strncmp(line, "T:", 2) == 0) {
+    time_t now = time(nullptr);
+    int maxTime = 0;
+    time_t startTime = 0;
+    bool hasTries = false;
+
+    // Read first line to get maxTime and startTime
+    if (fgets(line, sizeof(line), file)) {
+        if (sscanf(line, "%*s %*c %*s %*s %*s %*s %d %*s %*s %ld", 
+                  &maxTime, &startTime) == 2) {
+            // Check remaining lines for tries
+            while (fgets(line, sizeof(line), file)) {
+                if (strncmp(line, "T:", 2) == 0) {
+                    hasTries = true;
+                    break;
+                }
+            }
+            
             fclose(file);
-            return true;
+            
+            if ((now - startTime) <= maxTime) {
+                return hasTries ? ACTIVE_WITH_TRIES : ACTIVE_GAME;
+            } else {
+                return TIMED_OUT_GAME;
+            }
         }
     }
+
     fclose(file);
-    return false;
+    return NO_GAME;
 }
 
 std::string Server::handleStartGame(const std::string& request) {
@@ -366,7 +391,12 @@ std::string Server::handleStartGame(const std::string& request) {
             it->second.finalizeGame('T');
             activeGames.erase(it);
             erased = true;
-        } else if (hasActiveTry(plid)) {
+        } else if (it->second.getTrials().size() > 0) {
+            return "RSG NOK\n";
+        }
+    } else { // Check if game file exists
+        GameFileStatus status = checkGameFile(plid);
+        if (status == ACTIVE_WITH_TRIES || status == ACTIVE_GAME) {
             return "RSG NOK\n";
         }
     }
@@ -413,8 +443,11 @@ std::string Server::handleTry(const std::string& request) {
     // Check if game exists
     auto it = activeGames.find(plid);
     if (it == activeGames.end()) {
-        return "RTR NOK\n";
-    }
+        it = loadGameFromFile(plid);
+        if (it == activeGames.end()) {
+            return "RTR NOK\n";
+        }
+    } 
 
     std::string secretKey;
     secretKey = it->second.getSecretKey();
@@ -547,7 +580,10 @@ std::string Server::handleQuitExit(const std::string& request) {
 
     // Check if game exists
     if (it == activeGames.end()) {
-        return "RQT NOK\n";
+        it = loadGameFromFile(plid);
+        if (it == activeGames.end()) {
+            return "RQT NOK\n";
+        }
     }
 
     if (it->second.isTimeExceeded()) {
@@ -600,7 +636,12 @@ std::string Server::handleDebug(const std::string& request) {
             it->second.finalizeGame('T');
             activeGames.erase(it);
             erased = true;
-        } else if (hasActiveTry(plid)) {
+        } else if (it->second.getTrials().size() > 0) {
+            return "RDB NOK\n";
+        }
+    } else {
+        GameFileStatus status = checkGameFile(plid);
+        if (status == ACTIVE_WITH_TRIES || status == ACTIVE_GAME) {
             return "RDB NOK\n";
         }
     }
@@ -637,8 +678,12 @@ std::string Server::handleShowTrials(const std::string& request) {
     }
 
     auto it = activeGames.find(plid);
+    
+    if (it == activeGames.end()) {
+        it = loadGameFromFile(plid);
+    }
 
-    if (it->second.isTimeExceeded()) {
+    if (it != activeGames.end() && it->second.isTimeExceeded()) {
         it->second.finalizeGame('T');
         activeGames.erase(it);
     }
@@ -676,6 +721,32 @@ std::vector<std::string> Server::readGameFile(const std::string& filePath) {
     }
     
     return lines;
+}
+
+std::map<std::string, Game>::iterator Server::loadGameFromFile(const std::string& plid) {
+    GameFileStatus status = checkGameFile(plid);
+    if (status != ACTIVE_GAME && status != ACTIVE_WITH_TRIES) {
+        return activeGames.end();
+    }
+
+    try {
+        std::vector<std::string> lines = readGameFile("Server/GAMES/GAME_" + plid + ".txt");
+        if (!lines.empty()) {
+            char mode;
+            int maxTime;
+            std::string secretKey;
+            time_t startTime;
+            if (sscanf(lines[0].c_str(), "%*s %c %*s %d %*s %*s %ld", 
+                      &mode, &maxTime, &startTime) == 3) {
+                Game newGame(plid, maxTime, mode);
+                newGame.setSecretKey(secretKey);
+                return activeGames.insert(std::make_pair(plid, std::move(newGame))).first;
+            }
+        }
+    } catch (const std::exception& e) {
+        std::cerr << "Error loading game from file: " << e.what() << std::endl;
+    }
+    return activeGames.end();
 }
 
 std::string Server::formatGameHeader(const std::string& plid, const std::string& date, 
@@ -853,14 +924,6 @@ std::string Server::handleScoreBoard() {
         return "RSS EMPTY\n";
     }
 
-    /*
-    // Get current time for filename
-    time_t now = time(nullptr);
-    struct tm* timeinfo = localtime(&now);
-    char timestamp[20];
-    strftime(timestamp, sizeof(timestamp), "%d%m%y_%H_%M_%S", timeinfo);
-    */
-
     // Create filename
     std::string fileName = "TOP_10_SCORES_" + to_string(sb_count++) + ".txt";
 
@@ -942,7 +1005,7 @@ int main(int argc, char* argv[]) {
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "-p") == 0 && i + 1 < argc) {
             port = atoi(argv[i + 1]);
-            i++; // Skip next argument
+            i++; 
         }
         else if (strcmp(argv[i], "-v") == 0) {
             verbose = true;
