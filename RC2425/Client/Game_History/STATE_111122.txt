@@ -1,8 +1,0 @@
-     Active game found for player 111122
-Game initiated: 2024-12-14 14:06:53 with 200 seconds to be completed
-
-     --- Transactions found: 1 ---
-
-Trial: OPYP, nB: 4, nW: 0 at   4s
-
-Termination: WIN at 2024-12-14 14:06:57, Duration: 4s
