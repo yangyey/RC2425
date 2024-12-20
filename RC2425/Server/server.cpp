@@ -315,7 +315,7 @@ std::string Server::handleRequest(const std::string& request, bool isTCP,
             hasPlid = true;
         }
 
-        std::cout << "Request from client: " << command;
+        std::cout << "Request from client: " << command << " ";
         if (client_addr != nullptr) {
             std::cout << formatClientInfo(client_addr) << "\n";
         }
@@ -325,8 +325,6 @@ std::string Server::handleRequest(const std::string& request, bool isTCP,
             std::cout << "\n    PLID: " << plid;
         }
         std::cout << "\n    Full request: " << request;
-
-        std::cout << std::endl;
     }
 
     if (strcmp(command, REQUEST_START) == 0) {
