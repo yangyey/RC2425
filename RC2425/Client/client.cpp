@@ -50,7 +50,7 @@ void GameClient::parseArguments(int argc, char** argv) {
 
 void GameClient::setupUDPSocket() {
     udpSocket = socket(AF_INET, SOCK_DGRAM, 0);
-    timeout.tv_sec = 5;  // 5 second timeout
+    timeout.tv_sec = TIMEOUT_TIME;  
     timeout.tv_usec = 0;
 
     if (udpSocket == -1) {

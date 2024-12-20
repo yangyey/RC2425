@@ -7,6 +7,7 @@
 #define DSIP_DEFAULT "localhost"
 #define DSPORT_DEFAULT 58030
 
+#define TIMEOUT_TIME 5
 
 #define FAIL -1
 #define SUCCESS 0

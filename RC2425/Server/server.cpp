@@ -258,10 +258,8 @@ void Server::setupSockets(int port) {
 void Server::run() {
     while (true) {
         testfds = inputs;
-        timeout.tv_sec = 10;
-        timeout.tv_usec = 0;
 
-        int ready = select(FD_SETSIZE, &testfds, NULL, NULL, &timeout);
+        int ready = select(FD_SETSIZE, &testfds, NULL, NULL, NULL);
         
         if (ready < 0) {
             if (errno == EINTR) continue;
