@@ -1,7 +1,0 @@
-     Active game found for player 112233
-Game initiated: 2024-12-17 23:42:01 with 10 seconds to be completed
-
-     --- Transactions found: 0 ---
-
-
-Termination: TIMEOUT at 2024-12-17 23:42:24, Duration: 23s

@@ -1,8 +1,0 @@
-     Active game found for player 106469
-Game initiated: 2024-12-19 11:57:10 with 200 seconds to be completed
-
-     --- Transactions found: 1 ---
-
-Trial: OBOG, nB: 4, nW: 0 at   4s
-
-Termination: WIN at 2024-12-19 11:57:14, Duration: 4s
