@@ -20,3 +20,4 @@ utils.o: utils.cpp utils.hpp constant.hpp
 
 clean:
 	rm -f player GS *.o
+	rm -rf Server/GAMES Server/SCORES Client/Game_History Client/Top_Scores
