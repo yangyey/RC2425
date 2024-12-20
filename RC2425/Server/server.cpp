@@ -319,7 +319,7 @@ std::string Server::handleRequest(const std::string& request, bool isTCP,
         if (client_addr != nullptr) {
             std::cout << formatClientInfo(client_addr) << "\n";
         }
-        std::cout << "\n    Protocol: " << (isTCP ? "TCP" : "UDP") << "\n";
+        std::cout << "    Protocol: " << (isTCP ? "TCP" : "UDP") << "\n";
         std::cout << "    Command: " << command;
         if (hasPlid) {
             std::cout << "\n    PLID: " << plid;
